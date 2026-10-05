@@ -1,10 +1,10 @@
-# Solar Battery Health Monitor and Automated Messenger ☀️🔋
+# Solar Battery Health Monitor and Automated Messenger
 
 An intelligent Edge-to-Cloud IoT system that monitors 18650 lithium-ion solar battery health, predicts remaining backup runtime using Machine Learning, calculates TNEB electricity bill savings, cross-references live satellite weather, and sends 5-bullet layman reports via Telegram using Google Gemini AI.
 
 ---
 
-## 🚀 Quick Setup
+##  Quick Setup
 
 ### 1. Clone the Repository
 ```bash
@@ -19,7 +19,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🔑 Configuration (Open `live_monitor.py`)
+##  Configuration (Open `live_monitor.py`)
 
 Open `live_monitor.py` and set your credentials at the top (lines 28–39):
 
@@ -39,7 +39,7 @@ LONGITUDE          = 80.2707           # Your city longitude (e.g., Chennai: 80.
 
 ---
 
-## 🏃‍♂️ How to Run
+##  How to Run
 
 ### Step 1: Train the Machine Learning Model
 *(Only needs to be run once)*
@@ -59,12 +59,12 @@ This loads the 18650 dataset, trains the Random Forest Regressors, and exports `
 python live_monitor.py
 ```
 
-> 💡 **No Hardware? No Problem!**  
+>  **No Hardware? No Problem!**  
 > If an Arduino is not plugged in, the system automatically enters **Simulation Mode**, emulating your exact 18650 cell ($3.84\text{V}$) and 3W Rock Light solar panel ($5.85\text{V}$), so anyone can test it immediately on any laptop!
 
 ---
 
-## 📬 Sample 5-Bullet Report (Telegram & Console)
+##  Sample 5-Bullet Report (Telegram & Console)
 
 ```markdown
 🤖 Solar Battery Health Monitor & Messenger
