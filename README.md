@@ -4,7 +4,7 @@ An intelligent Edge-to-Cloud IoT system that monitors 18650 lithium-ion solar ba
 
 ---
 
-## 🚀 Quick Setup (For You & Your Friend)
+## 🚀 Quick Setup
 
 ### 1. Clone the Repository
 ```bash
@@ -64,7 +64,7 @@ python live_monitor.py
 
 ---
 
-## 📬 Sample 5-Bullet Layman Report (Telegram & Console)
+## 📬 Sample 5-Bullet Report (Telegram & Console)
 
 ```markdown
 🤖 Solar Battery Health Monitor & Messenger
@@ -78,6 +78,4 @@ python live_monitor.py
 
 ---
 
-## 👥 Authors
-Developed for Engineering Mini-Project:  
-**Solar Battery Health Monitor and Automated Messenger**
+
