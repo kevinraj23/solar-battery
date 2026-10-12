@@ -33,8 +33,11 @@ GEMINI_API_KEY     = "YOUR_GEMINI_KEY" # Free from https://aistudio.google.com
 
 # 3. Hardware COM Port & Location
 COM_PORT           = "COM3"            # Port of Arduino Nano (e.g. COM3, COM4)
-LATITUDE           = 13.0827           # Your city latitude (e.g., Chennai: 13.0827)
-LONGITUDE          = 80.2707           # Your city longitude (e.g., Chennai: 80.2707)
+LATITUDE           = 11.6643           # Salem Latitude
+LONGITUDE          = 78.1460           # Salem Longitude
+
+# 4. Tomorrow Weather & Demo Simulation
+SIMULATE_RAINY_TOMORROW = True         # Set True to test 'Rainy & Cloudy - Use Wisely' alert!
 ```
 
 ---
@@ -64,16 +67,18 @@ python live_monitor.py
 
 ---
 
-##  Sample 5-Bullet Report (Telegram & Console)
+## 📬 Sample Predictive Report (Telegram & Console)
 
 ```markdown
 🤖 Solar Battery Health Monitor & Messenger
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• 🔋 Battery Health: 94% (Healthy) • 6 Hours 40 Mins backup tonight
-• ☀️ Solar Energy: 14.5 Watt-hours generated today
-• 💰 TNEB Savings: 0.015 Units • Saved ₹1.20 today (₹36.00/month)
-• ⛅ Weather Today: Sunny (31.5°C) • Cloud Cover 18%
-• 💡 Smart Advice: Ample sun today! Full brightness backup assured all night.
+📍 Station: Salem, TN • 06:46 PM
+────────────────────────────────
+• 🔋 Battery Health: 94% (Healthy) • 6h 40m backup tonight
+• ☀️ Solar Energy: 14.5 Wh generated today
+• 💰 TNEB Savings: 0.015 Units • Saved ₹1.20 today (₹36.00/mo)
+• ⛅ Salem Weather: Today: Partly Cloudy (29.8°C) • Cloud Cover 65%
+• 🔮 Tomorrow Forecast: Rainy & Cloudy 🌧️ • Rain Chance 85%
+• 💡 Smart Advice: ⚠️ Tomorrow is forecast to be Rainy & Cloudy in Salem (85% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!
 ```
 
 ---

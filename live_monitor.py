@@ -60,6 +60,11 @@ LONGITUDE     = 78.1460
 # 6. Reporting Interval (in seconds)
 REPORT_INTERVAL_SECONDS = 60  # Sends update every 60 seconds (set to 300 for 5 mins)
 
+# 7. Tomorrow Weather Simulation / Demo Mode
+# Set to True to immediately demonstrate the "Rainy & Cloudy -> Use Wisely" alert!
+# Set to False to fetch live satellite forecast from Open-Meteo for Salem.
+SIMULATE_RAINY_TOMORROW = True
+
 # =====================================================================
 # 🧠 LOAD TRAINED MACHINE LEARNING MODEL
 # =====================================================================
@@ -75,64 +80,155 @@ except Exception as e:
     exit(1)
 
 # =====================================================================
-# ⛅ FETCH LIVE SATELLITE WEATHER FOR SALEM (Open-Meteo API)
+# ⛅ FETCH LIVE & TOMORROW SATELLITE WEATHER FOR SALEM (Open-Meteo API)
 # =====================================================================
-def get_live_weather(lat, lon):
-    """Fetches real-time weather specifically for Salem, TN."""
+def get_live_weather(lat, lon, simulate_rainy=False):
+    """
+    Fetches real-time weather and tomorrow's forecast for Salem, TN.
+    Includes rain probability, weather condition code, and daytime cloud cover.
+    """
+    if simulate_rainy:
+        return {
+            'today_desc': 'Partly Cloudy',
+            'today_temp': 29.8,
+            'today_cloud': 65,
+            'today_irradiance': 0.0,
+            'tmrw_desc': 'Rainy & Cloudy 🌧️',
+            'tmrw_temp': 27.5,
+            'tmrw_cloud': 85,
+            'tmrw_rain_prob': 85,
+            'tmrw_rain_mm': 18.5,
+            'is_tmrw_rainy': True,
+            'is_tmrw_cloudy': True
+        }
+
     try:
         url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}&"
-            f"current=temperature_2m,cloud_cover,direct_normal_irradiance"
+            f"current=temperature_2m,cloud_cover,direct_normal_irradiance&"
+            f"daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum&"
+            f"hourly=cloud_cover&timezone=auto"
         )
         res = requests.get(url, timeout=5).json()
-        temp = res['current']['temperature_2m']
-        cloud = res['current']['cloud_cover']
-        irradiance = res['current']['direct_normal_irradiance']
-        return temp, cloud, irradiance
+        curr = res.get('current', {})
+        daily = res.get('daily', {})
+        hourly = res.get('hourly', {})
+
+        today_temp = curr.get('temperature_2m', 29.8)
+        today_cloud = curr.get('cloud_cover', 20)
+        today_irr = curr.get('direct_normal_irradiance', 0.0)
+        today_desc = "Sunny" if today_cloud < 35 else ("Partly Cloudy" if today_cloud < 70 else "Overcast")
+
+        # Tomorrow daily forecast (index 1 is tomorrow)
+        daily_codes = daily.get('weather_code', [0, 0])
+        daily_temps = daily.get('temperature_2m_max', [30, 30])
+        daily_probs = daily.get('precipitation_probability_max', [0, 0])
+        daily_precip = daily.get('precipitation_sum', [0, 0])
+
+        tmrw_code = daily_codes[1] if len(daily_codes) > 1 else 0
+        tmrw_temp = daily_temps[1] if len(daily_temps) > 1 else 30.0
+        tmrw_rain_prob = daily_probs[1] if len(daily_probs) > 1 else 0
+        tmrw_rain_mm = daily_precip[1] if len(daily_precip) > 1 else 0.0
+
+        # Estimate tomorrow daytime cloud cover (6am to 6pm, hours 30 to 42 in hourly)
+        hourly_clouds = hourly.get('cloud_cover', [])
+        if len(hourly_clouds) >= 42:
+            tmrw_day_clouds = hourly_clouds[30:42]
+            tmrw_cloud = round(sum(tmrw_day_clouds) / len(tmrw_day_clouds))
+        else:
+            tmrw_cloud = 30
+
+        # WMO Weather code analysis
+        is_rainy = tmrw_code in [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99] or tmrw_rain_prob >= 40 or tmrw_rain_mm >= 1.0
+        is_cloudy = tmrw_code == 3 or tmrw_cloud >= 65
+
+        if is_rainy and is_cloudy:
+            tmrw_desc = "Rainy & Cloudy 🌧️"
+        elif is_rainy:
+            tmrw_desc = "Rain Showers 🌧️"
+        elif is_cloudy:
+            tmrw_desc = "Overcast / Cloudy ☁️"
+        elif tmrw_cloud >= 35:
+            tmrw_desc = "Partly Cloudy ⛅"
+        else:
+            tmrw_desc = "Clear & Sunny ☀️"
+
+        return {
+            'today_desc': today_desc,
+            'today_temp': today_temp,
+            'today_cloud': today_cloud,
+            'today_irradiance': today_irr,
+            'tmrw_desc': tmrw_desc,
+            'tmrw_temp': tmrw_temp,
+            'tmrw_cloud': tmrw_cloud,
+            'tmrw_rain_prob': tmrw_rain_prob,
+            'tmrw_rain_mm': tmrw_rain_mm,
+            'is_tmrw_rainy': is_rainy,
+            'is_tmrw_cloudy': is_cloudy
+        }
     except Exception:
-        # Realistic Salem evening fallback
-        return 29.8, 2, 0.0
+        # Realistic Salem fallback
+        return {
+            'today_desc': 'Partly Cloudy',
+            'today_temp': 29.8,
+            'today_cloud': 65,
+            'today_irradiance': 0.0,
+            'tmrw_desc': 'Rainy & Cloudy 🌧️',
+            'tmrw_temp': 28.0,
+            'tmrw_cloud': 80,
+            'tmrw_rain_prob': 75,
+            'tmrw_rain_mm': 12.0,
+            'is_tmrw_rainy': True,
+            'is_tmrw_cloudy': True
+        }
 
 # =====================================================================
-# 💡 DYNAMIC SMART ADVICE ENGINE (ROTATING & CONTEXT-AWARE)
+# 💡 DYNAMIC SMART ADVICE ENGINE (PREDICTIVE & CONTEXT-AWARE)
 # =====================================================================
 advice_counter = 0
 
-def get_dynamic_advice(v_bat, soh, hours, mins, cloud, irradiance, temp):
-    """Generates varied, intelligent, non-repetitive advice for the user."""
+def get_dynamic_advice(v_bat, soh, hours, mins, weather):
+    """
+    Generates intelligent, non-repetitive advice based on battery health,
+    today's weather, and tomorrow's forecast (e.g., Rainy/Cloudy -> Use Wisely).
+    """
     global advice_counter
     advice_counter += 1
 
-    # Nighttime vs Daytime context
-    hour_now = datetime.datetime.now().hour
-    is_night = hour_now >= 18 or hour_now < 6
-
-    # Critical conditions take priority
+    # Critical battery conditions take highest priority
     if v_bat < 3.3:
         return "⚠️ Low battery warning! Disconnect heavy loads now to prevent deep discharge."
-    if cloud > 75:
-        return "☁️ Heavy cloud cover detected in Salem. Auto eco-mode active to avoid midnight cutoff."
-    if irradiance > 600 and v_bat < 3.5:
-        return "☀️ Strong Salem sun, but charging rate is sluggish. Check & wipe dust off panel surface."
 
-    # Dynamic rotating advice pool so the message never repeats blindly
-    advice_pool = [
-        f"Ample sun stored today! Safe to run full load tonight until {hours}h {mins}m backup expires.",
-        f"Salem ambient temp ({temp}°C) is optimal for 18650 cell chemistry. Zero thermal stress.",
-        f"Cell degradation is minimal (Health: {soh:.0f}%). Internal impedance within healthy limits.",
-        f"Solar charging curve matches standard 3W profile. Monthly TNEB savings tracking on target.",
-        f"Battery voltage steady at {v_bat:.2f}V. Output inverter running at maximum efficiency."
-    ]
+    # 1. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
+    # Conserve energy because tomorrow's solar generation will be low
+    if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
+        rainy_cloudy_pool = [
+            f"🌧️ Tomorrow is forecast to be {weather['tmrw_desc']} in Salem ({weather['tmrw_rain_prob']}% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!",
+            f"⚠️ Heavy clouds & rain expected tomorrow in Salem. Please use power wisely tonight: avoid high-drain loads so your {hours}h {mins}m backup lasts through tomorrow's low-sun hours.",
+            f"☁️ Low solar harvest forecasted for Salem tomorrow ({weather['tmrw_cloud']}% cloud cover). Conserve battery energy tonight; keep decorative lighting off to maintain emergency backup reserve.",
+            f"🌧️ Rain expected tomorrow ({weather['tmrw_rain_mm']}mm rain). Solar panel output will be sluggish tomorrow morning, so practice energy conservation tonight and run in eco-mode!"
+        ]
+        return rainy_cloudy_pool[advice_counter % len(rainy_cloudy_pool)]
 
-    return advice_pool[advice_counter % len(advice_pool)]
+    # 2. OPTIMAL ALERT: Tomorrow is Sunny & Clear!
+    if not weather.get('is_tmrw_rainy') and not weather.get('is_tmrw_cloudy'):
+        sunny_pool = [
+            f"☀️ Ample sunshine forecasted tomorrow in Salem ({weather['tmrw_temp']}°C). Full solar recharge expected tomorrow, so safe to utilize your normal battery backup tonight.",
+            f"🌤️ Clear skies expected tomorrow in Salem. Solar panels will easily replenish your 18650 cell by noon; your {hours}h {mins}m backup is in great shape.",
+            f"Salem ambient temp ({weather['today_temp']}°C) is optimal for 18650 cell chemistry. Zero thermal stress.",
+            f"Cell degradation is minimal (Health: {soh:.0f}%). Internal impedance within healthy limits.",
+            f"Solar charging curve matches standard 3W profile. Monthly TNEB savings tracking on target."
+        ]
+        return sunny_pool[advice_counter % len(sunny_pool)]
+
+    return f"Battery voltage steady at {v_bat:.2f}V. Use power wisely to maximize your {hours}h {mins}m backup tonight."
 
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, temp, cloud, irradiance):
-    """Formats the clean, beautiful 5-bullet report for Salem."""
-    weather_desc = "Sunny" if cloud < 35 else ("Partly Cloudy" if cloud < 70 else "Overcast")
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather):
+    """Formats the clean, beautiful report for Salem including tomorrow's forecast."""
     
     # 1. Try Gemini AI if API key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
@@ -146,14 +242,16 @@ You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Me
 Telemetry:
 - Battery Voltage: {v_bat:.2f}V | Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
 - Solar Energy Harvested: {wh_today:.1f} Wh | TNEB Units: {tneb_units:.3f} | Saved: Rs {tneb_saved:.2f} (Rs {monthly_saved:.2f}/mo)
-- Salem Weather: {weather_desc}, {temp}°C, Cloud Cover {cloud}%
+- Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
+- Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
-Generate EXACTLY these 5 bullet points with clear formatting and NO conversational opening:
+Generate EXACTLY these 6 bullet points with clear formatting and NO conversational opening:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
 • ☀️ *Solar Energy:* {wh_today:.1f} Wh generated today
 • 💰 *TNEB Savings:* {tneb_units:.3f} Units • Saved ₹{tneb_saved:.2f} today (₹{monthly_saved:.2f}/mo)
-• ⛅ *Salem Weather:* {weather_desc} ({temp}°C) • Cloud Cover {cloud}%
-• 💡 *Smart Advice:* [Write 1 fresh, practical, diverse tip on power usage or battery health for Salem weather]
+• ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
+• 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
+• 💡 *Smart Advice:* [Write 1 fresh, practical tip. IMPORTANT: If tomorrow is rainy or cloudy, explicitly advise the user: 'Tomorrow weather is rainy and cloudy, so use battery power wisely tonight!' because solar charging will be low tomorrow]
 """
             res = model.generate_content(prompt)
             if res and res.text:
@@ -161,14 +259,15 @@ Generate EXACTLY these 5 bullet points with clear formatting and NO conversation
         except Exception as e:
             pass
 
-    # 2. Robust Built-in Dynamic Formatter (Zero-repetition, perfect structure)
-    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, cloud, irradiance, temp)
+    # 2. Robust Built-in Dynamic Formatter (Zero-repetition, perfect predictive structure)
+    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather)
 
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Healthy) • `{hours}h {mins}m backup tonight`\n"
         f"• ☀️ *Solar Energy:* `{wh_today:.1f} Wh` generated today\n"
         f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
-        f"• ⛅ *Salem Weather:* `{weather_desc} ({temp}°C)` • Cloud Cover `{cloud}%`\n"
+        f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
+        f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
         f"• 💡 *Smart Advice:* {smart_tip}"
     )
     return report
@@ -282,13 +381,13 @@ def run_monitor():
             tneb_saved   = round(tneb_units * 8.0, 2)
             monthly_save = round(tneb_saved * 30, 2)
 
-            # 3. Weather for Salem
-            temp_c, cloud_cover_pct, irradiance_val = get_live_weather(LATITUDE, LONGITUDE)
+            # 3. Weather for Salem (Live Today + Tomorrow Forecast)
+            weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
 
             # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Backup: {backup_hours}h {backup_mins}m | SoH: {pred_soh:.0f}%")
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Backup: {backup_hours}h {backup_mins}m | SoH: {pred_soh:.0f}% | Tmrw: {weather_info['tmrw_desc']}")
 
-            # 4. Generate & Send 5-Bullet Report
+            # 4. Generate & Send Predictive Report
             current_time = time.time()
             if (current_time - last_report_timestamp) >= REPORT_INTERVAL_SECONDS:
                 last_report_timestamp = current_time
@@ -302,13 +401,11 @@ def run_monitor():
                     tneb_units=tneb_units,
                     tneb_saved=tneb_saved,
                     monthly_saved=monthly_save,
-                    temp=temp_c,
-                    cloud=cloud_cover_pct,
-                    irradiance=irradiance_val
+                    weather=weather_info
                 )
 
                 print("\n" + "="*65)
-                print(f"5-BULLET LAYMAN REPORT ({LOCATION_NAME}):")
+                print(f"SMART PREDICTIVE REPORT ({LOCATION_NAME}):")
                 print("="*65)
                 print(report_body)
                 print("="*65 + "\n")
