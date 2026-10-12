@@ -17,6 +17,8 @@ cd solar-battery-monitor
 pip install -r requirements.txt
 ```
 
+> 📋 **Looking for 1-click copy-paste terminal commands?** Check out the [Installation Guide (INSTALL.md)](INSTALL.md) for individual commands and installation verifications.
+
 ---
 
 ##  Configuration (Open `live_monitor.py`)

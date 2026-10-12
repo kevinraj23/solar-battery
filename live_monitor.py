@@ -221,12 +221,24 @@ def evaluate_panel_soiling(v_solar, irradiance, simulate_dust=False):
 
     # Expected voltage for 6V 3W panel under sunshine
     expected_v = min(5.8, max(3.5, 3.5 + (irradiance / 1000.0) * 2.3))
-    ratio = min(1.0, max(0.2, v_solar / expected_v))
+    ratio = min(1.0, max(0.05, v_solar / expected_v))
     cleanliness = int(ratio * 100)
-    is_dusty = cleanliness < 65
     loss_pct = max(0, 100 - cleanliness)
     loss_watts = round((loss_pct / 100.0) * 2.8, 2)
 
+    # Differentiate between indoor/deep shade vs actual glass dust
+    # Dust rarely blocks >65% light under clear sunshine. Severe drop means shaded/indoors.
+    if loss_pct > 65 or (irradiance > 400.0 and v_solar < 2.5):
+        return {
+            'cleanliness_pct': cleanliness,
+            'is_dusty': False,
+            'status': 'Indoors / Heavily Shaded 🏢',
+            'loss_pct': loss_pct,
+            'loss_watts': loss_watts,
+            'irradiance': irradiance
+        }
+
+    is_dusty = cleanliness < 70
     return {
         'cleanliness_pct': cleanliness,
         'is_dusty': is_dusty,
@@ -259,12 +271,31 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
     if v_bat < 3.3:
         return f"⚠️ Low battery warning ({v_bat:.2f}V)! Disconnect {current_ma:.0f}mA load now to prevent deep discharge."
 
-    # 3. AUTOMATIC DUST / SOILING DETECTION ALERT
+    # 3. INDOOR / HEAVY SHADE DETECTION ALERT
+    if panel_dust and 'Indoors' in panel_dust.get('status', ''):
+        indoor_pool = [
+            f"🏢 Solar Panel appears Indoors or in Deep Shade! Output is down -{panel_dust['loss_pct']}%. Move panel into direct sunlight to initiate high-speed charging.",
+            f"📍 Low Light Warning: The solar panel is not receiving direct sunlight (current loss: -{panel_dust['loss_pct']}%). Place panel outdoors facing South for maximum solar harvest.",
+            f"⚠️ Deep Shading Detected: Only indoor/diffuse light is reaching the panel. Bring the panel outside to recharge your 18650 cell!"
+        ]
+        return indoor_pool[advice_counter % len(indoor_pool)]
+
+    # 4. AUTOMATIC DUST / SOILING DETECTION ALERT
     if panel_dust and panel_dust.get('is_dusty'):
         if weather.get('is_tmrw_rainy'):
-            return f"🧹 Panel Dust Detected (-{panel_dust['loss_pct']}% generation loss). However, tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain chance) — natural rainwater will wash it clean, no manual wiping needed!"
+            dust_rain_pool = [
+                f"🧹 Panel Dust Detected (-{panel_dust['loss_pct']}% generation loss). However, tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain chance) — natural rainwater will wash it clean, no manual wiping needed!",
+                f"🌧️ Natural Wash Expected: Panel glass has dust accumulation (-{panel_dust['loss_pct']}% loss), but tomorrow's rain forecast ({weather['tmrw_rain_prob']}%) will naturally rinse the panel clean without manual effort.",
+                f"🧹 Panel Cleanliness {panel_dust['cleanliness_pct']}%: Dust is reducing solar output by ~{panel_dust['loss_watts']}W. Tomorrow's rain showers will clean the glass naturally!"
+            ]
+            return dust_rain_pool[advice_counter % len(dust_rain_pool)]
         else:
-            return f"🧹 Panel Dust Alert: Solar panel output is {panel_dust['loss_pct']}% below expected under bright sunlight! Wipe panel glass with a soft damp cloth today to restore full charging speed."
+            dust_dry_pool = [
+                f"🧹 Panel Dust Alert: Solar panel output is {panel_dust['loss_pct']}% below expected under bright sunlight! Wipe panel glass with a soft damp cloth today to restore full charging speed.",
+                f"☀️ Dusty Glass Warning: Cleanliness score is {panel_dust['cleanliness_pct']}%. A gentle wipe with a microfiber cloth will recover ~{panel_dust['loss_watts']}W of charging capacity today.",
+                f"⚠️ Optical Soiling Detected: Panel output is throttled by -{panel_dust['loss_pct']}%. Please clean the panel glass today to maximize solar harvest before dusk."
+            ]
+            return dust_dry_pool[advice_counter % len(dust_dry_pool)]
 
     # 4. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
     if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
@@ -328,7 +359,7 @@ Generate EXACTLY these 7 bullet points with clear formatting and NO conversation
             if res and res.text:
                 return res.text.strip()
         except Exception as e:
-            pass
+            print(f"[AI REPORT INFO] Gemini API unavailable ({e}). Using dynamic engine.")
 
     # 2. Robust Built-in Dynamic Formatter (Zero-repetition, perfect predictive structure)
     smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=temp_bat, current_ma=current_ma, panel_dust=panel_dust)
@@ -482,28 +513,69 @@ INSTRUCTIONS:
             res = model.generate_content(prompt)
             if res and res.text:
                 return res.text.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[AI COPILOT INFO] Gemini API unavailable ({e}). Using offline diagnostic engine.")
 
     # 2. Robust Built-in Smart Diagnostic Engine (Offline / Zero-API fallback)
     text = user_question.lower()
 
     # Solar Panel & Dust / Soiling query (e.g., "is panel dusty?", "panel health", "clean panel", "thusi")
-    if any(k in text for k in ['dust', 'dirty', 'clean', 'panel', 'soiling', 'wash', 'wipe', 'thusi', 'kannaadi']):
-        if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
+    if any(k in text for k in ['dust', 'dirty', 'clean', 'panel', 'soiling', 'wash', 'wipe', 'thusi', 'kannaadi', 'shadow', 'indoor']):
+        # If panel is indoors or heavily shaded
+        if 'Indoors' in panel_dust.get('status', ''):
+            if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
+                return (
+                    f"🏢 *சோலார் பேனல் நிலை:* அறைக்குள் / அதிக நிழலில் உள்ளது!\n"
+                    f"நேரடி சூரிய ஒளி இல்லாததால் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
+                    f"💡 *ஆலோசனை:* பேட்டரியை வேகமாக சார்ஜ் செய்ய பேனலை வெளியில் வெயிலில் வைக்கவும்!"
+                )
             return (
-                f"🧹 *சோலார் பேனல் தூய்மை நிலை:*\n"
-                f"பேனல் கண்ணாடியில் தூசி படிந்துள்ளது (தூய்மை: `{panel_dust['cleanliness_pct']}%`).\n"
-                f"இதனால் சோலார் மின் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
-                f"💡 *ஆலோசனை:* கண்ணாடியை மெல்லிய ஈரத்துணியால் துடைத்தால் சார்ஜிங் உடனடியாக அதிகரிக்கும்!"
+                f"🏢 *Solar Panel Placement Telemetry:*\n"
+                f"• Detected State: `{panel_dust['status']}`\n"
+                f"• Light Deficit: `-{panel_dust['loss_pct']}%` loss compared to outdoor sunlight.\n"
+                f"💡 *Recommendation:* The panel is receiving indoor/ambient lighting. Move it outdoors under direct sun to charge your battery!"
             )
+
+        # Tamil response rotation
+        if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
+            tamil_options = [
+                (
+                    f"🧹 *சோலார் பேனல் தூய்மை நிலை:*\n"
+                    f"பேனல் கண்ணாடியில் தூசி படிந்துள்ளது (தூய்மை: `{panel_dust['cleanliness_pct']}%`).\n"
+                    f"இதனால் சோலார் மின் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
+                    f"💡 *ஆலோசனை:* கண்ணாடியை மெல்லிய ஈரத்துணியால் துடைத்தால் சார்ஜிங் உடனடியாக அதிகரிக்கும்!"
+                ),
+                (
+                    f"☀️ *சோலார் பேனல் ஆய்வு:*\n"
+                    f"• கண்ணாடி தூய்மை: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
+                    f"• தூசி இழப்பு: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W இழப்பு)\n"
+                    f"💡 *ஆலோசனை:* நாளை மழை பெய்தால் தானாகவே தூய்மையாகும், இல்லையெனில் துடைக்கவும்!"
+                )
+            ]
+            return tamil_options[advice_counter % len(tamil_options)]
+
         rain_note = "Tomorrow's rain will naturally wash your panel clean!" if weather.get('is_tmrw_rainy') else "Wipe the panel glass with a soft damp microfiber cloth today to recover full 3W solar generation!"
-        return (
-            f"🧹 *Solar Panel Cleanliness Diagnosis:*\n"
-            f"• Cleanliness Score: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
-            f"• Optical Loss: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W lost under sunshine)\n"
-            f"💡 *Recommendation:* {rain_note}"
-        )
+        english_options = [
+            (
+                f"🧹 *Solar Panel Cleanliness Diagnosis:*\n"
+                f"• Cleanliness Score: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
+                f"• Optical Loss: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W lost under sunshine)\n"
+                f"💡 *Recommendation:* {rain_note}"
+            ),
+            (
+                f"☀️ *Solar Optical Soiling Check:*\n"
+                f"• Glass Transmission: `{panel_dust['cleanliness_pct']}%` | State: `{panel_dust['status']}`\n"
+                f"• Power Penalty: `-{panel_dust['loss_pct']}%` generation drop\n"
+                f"💡 *Maintenance Tip:* {rain_note}"
+            ),
+            (
+                f"🔍 *Live Panel Health Telemetry:*\n"
+                f"Solar harvest is currently throttled by `-{panel_dust['loss_pct']}%` due to surface soiling.\n"
+                f"• Current Health: `{panel_dust['cleanliness_pct']}% Clean`\n"
+                f"💡 *Advice:* {rain_note}"
+            )
+        ]
+        return english_options[advice_counter % len(english_options)]
 
     # General Tamil / Tanglish intent
     if any(k in text for k in ['nalaiki', 'epdi', 'iruku', 'mazhai', 'sollu', 'vanakam', 'kaatru']):
