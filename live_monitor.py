@@ -188,36 +188,42 @@ def get_live_weather(lat, lon, simulate_rainy=False):
 # =====================================================================
 advice_counter = 0
 
-def get_dynamic_advice(v_bat, soh, hours, mins, weather):
+def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_ma=480.0):
     """
     Generates intelligent, non-repetitive advice based on battery health,
-    today's weather, and tomorrow's forecast (e.g., Rainy/Cloudy -> Use Wisely).
+    temperature safety, load current, and tomorrow's forecast (e.g., Rainy/Cloudy -> Use Wisely).
     """
     global advice_counter
     advice_counter += 1
 
-    # Critical battery conditions take highest priority
-    if v_bat < 3.3:
-        return "⚠️ Low battery warning! Disconnect heavy loads now to prevent deep discharge."
+    # 1. Thermal Safety Checks (18650 Lithium Chemistry Safety)
+    if temp_bat > 45.0:
+        return f"🔥 High battery temperature ({temp_bat:.1f}°C)! Move cell away from heat and reduce load to avoid thermal degradation."
+    if temp_bat > 38.0 and advice_counter % 3 == 0:
+        return f"🌡️ Cell temperature warm ({temp_bat:.1f}°C). Ensure ventilation around the 18650 holder for optimal cycle life."
 
-    # 1. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
+    # 2. Critical voltage takes priority
+    if v_bat < 3.3:
+        return f"⚠️ Low battery warning ({v_bat:.2f}V)! Disconnect {current_ma:.0f}mA load now to prevent deep discharge."
+
+    # 3. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
     # Conserve energy because tomorrow's solar generation will be low
     if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
         rainy_cloudy_pool = [
             f"🌧️ Tomorrow is forecast to be {weather['tmrw_desc']} in Salem ({weather['tmrw_rain_prob']}% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!",
             f"⚠️ Heavy clouds & rain expected tomorrow in Salem. Please use power wisely tonight: avoid high-drain loads so your {hours}h {mins}m backup lasts through tomorrow's low-sun hours.",
-            f"☁️ Low solar harvest forecasted for Salem tomorrow ({weather['tmrw_cloud']}% cloud cover). Conserve battery energy tonight; keep decorative lighting off to maintain emergency backup reserve.",
+            f"☁️ Low solar harvest forecasted for Salem tomorrow ({weather['tmrw_cloud']}% cloud cover). Current load is {current_ma:.0f}mA—conserve energy tonight to maintain backup reserve.",
             f"🌧️ Rain expected tomorrow ({weather['tmrw_rain_mm']}mm rain). Solar panel output will be sluggish tomorrow morning, so practice energy conservation tonight and run in eco-mode!"
         ]
         return rainy_cloudy_pool[advice_counter % len(rainy_cloudy_pool)]
 
-    # 2. OPTIMAL ALERT: Tomorrow is Sunny & Clear!
+    # 4. OPTIMAL ALERT: Tomorrow is Sunny & Clear!
     if not weather.get('is_tmrw_rainy') and not weather.get('is_tmrw_cloudy'):
         sunny_pool = [
             f"☀️ Ample sunshine forecasted tomorrow in Salem ({weather['tmrw_temp']}°C). Full solar recharge expected tomorrow, so safe to utilize your normal battery backup tonight.",
             f"🌤️ Clear skies expected tomorrow in Salem. Solar panels will easily replenish your 18650 cell by noon; your {hours}h {mins}m backup is in great shape.",
-            f"Salem ambient temp ({weather['today_temp']}°C) is optimal for 18650 cell chemistry. Zero thermal stress.",
-            f"Cell degradation is minimal (Health: {soh:.0f}%). Internal impedance within healthy limits.",
+            f"Battery cell temperature ({temp_bat:.1f}°C) is in the safe thermal zone for 18650 chemistry. Zero thermal stress.",
+            f"Cell degradation is minimal (Health: {soh:.0f}%). Real load current steady at {current_ma:.0f}mA.",
             f"Solar charging curve matches standard 3W profile. Monthly TNEB savings tracking on target."
         ]
         return sunny_pool[advice_counter % len(sunny_pool)]
@@ -227,8 +233,10 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather):
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather):
-    """Formats the clean, beautiful report for Salem including tomorrow's forecast."""
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5):
+    """Formats the clean, beautiful report for Salem including telemetry, thermal health, and tomorrow's forecast."""
+    real_power_w = round((v_bat * current_ma) / 1000.0, 2)
+    thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
     
     # 1. Try Gemini AI if API key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
@@ -240,13 +248,15 @@ def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_s
             prompt = f"""
 You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Messenger' stationed in Salem, Tamil Nadu.
 Telemetry:
-- Battery Voltage: {v_bat:.2f}V | Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
+- Battery Voltage: {v_bat:.2f}V | Current Draw: {current_ma:.0f}mA ({real_power_w:.2f}W) | Cell Temp: {temp_bat:.1f}°C ({thermal_status})
+- Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
 - Solar Energy Harvested: {wh_today:.1f} Wh | TNEB Units: {tneb_units:.3f} | Saved: Rs {tneb_saved:.2f} (Rs {monthly_saved:.2f}/mo)
 - Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
 - Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
-Generate EXACTLY these 6 bullet points with clear formatting and NO conversational opening:
+Generate EXACTLY these 7 bullet points with clear formatting and NO conversational opening:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
+• ⚡ *Real Load:* {current_ma:.0f} mA ({real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 • ☀️ *Solar Energy:* {wh_today:.1f} Wh generated today
 • 💰 *TNEB Savings:* {tneb_units:.3f} Units • Saved ₹{tneb_saved:.2f} today (₹{monthly_saved:.2f}/mo)
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
@@ -260,10 +270,11 @@ Generate EXACTLY these 6 bullet points with clear formatting and NO conversation
             pass
 
     # 2. Robust Built-in Dynamic Formatter (Zero-repetition, perfect predictive structure)
-    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather)
+    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=temp_bat, current_ma=current_ma)
 
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Healthy) • `{hours}h {mins}m backup tonight`\n"
+        f"• ⚡ *Real Load:* `{current_ma:.0f} mA` ({real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
         f"• ☀️ *Solar Energy:* `{wh_today:.1f} Wh` generated today\n"
         f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
@@ -348,8 +359,10 @@ def run_monitor():
                     if not line or ',' not in line:
                         continue
                     parts = line.split(',')
-                    v_battery = float(parts[0])
-                    v_solar   = float(parts[1])
+                    v_battery  = float(parts[0])
+                    v_solar    = float(parts[1])
+                    current_ma = float(parts[2]) if len(parts) > 2 else 480.0
+                    temp_bat   = float(parts[3]) if len(parts) > 3 else 30.5
                 except:
                     continue
             else:
@@ -358,7 +371,9 @@ def run_monitor():
                 v_battery = round(3.88 - (sim_step * 0.003), 2)
                 if v_battery < 3.20:
                     v_battery = 3.88  # Reset cycle
-                v_solar = 5.82
+                v_solar    = 5.82
+                current_ma = 480.0  # 3W Rock Light draw ~ 480mA
+                temp_bat   = round(30.5 + (sim_step * 0.02), 1)
 
             elapsed_minutes = (time.time() - start_time) / 60.0
             if previous_v is None:
@@ -385,7 +400,7 @@ def run_monitor():
             weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
 
             # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Backup: {backup_hours}h {backup_mins}m | SoH: {pred_soh:.0f}% | Tmrw: {weather_info['tmrw_desc']}")
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Load: {current_ma:.0f}mA | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
 
             # 4. Generate & Send Predictive Report
             current_time = time.time()
@@ -401,7 +416,9 @@ def run_monitor():
                     tneb_units=tneb_units,
                     tneb_saved=tneb_saved,
                     monthly_saved=monthly_save,
-                    weather=weather_info
+                    weather=weather_info,
+                    current_ma=current_ma,
+                    temp_bat=temp_bat
                 )
 
                 print("\n" + "="*65)

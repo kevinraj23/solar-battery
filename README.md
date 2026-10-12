@@ -52,18 +52,23 @@ python train_model.py
 This loads the 18650 dataset, trains the Random Forest Regressors, and exports `battery_model.pkl`.
 
 ### Step 2: Upload Firmware to Arduino Nano
-1. Open `arduino_sensor.ino` in Arduino IDE.
-2. Select Board: **Arduino Nano**, Processor: **ATmega328P**.
-3. Upload to your Nano.
-4. **Close the Serial Monitor in Arduino IDE.**
+1. Connect sensors to Arduino Nano:
+   - **Pin A0**: 18650 Battery Voltage Divider (10k resistor)
+   - **Pin A1**: Solar Panel Voltage Divider (10k:10k resistors)
+   - **Pin A2**: ACS712-05A Current Sensor OUT
+   - **Pin A3**: LM35 Temperature Sensor VOUT
+2. Open `arduino_sensor.ino` in Arduino IDE.
+3. Select Board: **Arduino Nano**, Processor: **ATmega328P**.
+4. Upload to your Nano.
+5. **Close the Serial Monitor in Arduino IDE.**
 
 ### Step 3: Run the Live Monitor
 ```bash
 python live_monitor.py
 ```
 
->  **No Hardware? No Problem!**  
-> If an Arduino is not plugged in, the system automatically enters **Simulation Mode**, emulating your exact 18650 cell ($3.84\text{V}$) and 3W Rock Light solar panel ($5.85\text{V}$), so anyone can test it immediately on any laptop!
+> 💡 **No Hardware? No Problem!**  
+> If an Arduino is not plugged in, the system automatically enters **Simulation Mode**, emulating your exact 18650 cell ($3.84\text{V}$), 3W Rock Light solar panel ($5.85\text{V}$), 480mA load current, and 30.5°C cell temperature!
 
 ---
 
@@ -74,6 +79,7 @@ python live_monitor.py
 📍 Station: Salem, TN • 06:46 PM
 ────────────────────────────────
 • 🔋 Battery Health: 94% (Healthy) • 6h 40m backup tonight
+• ⚡ Real Load: 480 mA (1.85 W) • Cell Temp: 31.2°C (Safe)
 • ☀️ Solar Energy: 14.5 Wh generated today
 • 💰 TNEB Savings: 0.015 Units • Saved ₹1.20 today (₹36.00/mo)
 • ⛅ Salem Weather: Today: Partly Cloudy (29.8°C) • Cloud Cover 65%
