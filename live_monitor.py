@@ -20,6 +20,8 @@ import joblib
 import numpy as np
 import serial
 import serial.tools.list_ports
+import threading
+import re
 
 # Suppress sklearn feature name warnings
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -328,6 +330,203 @@ def send_telegram_alerts(report_body):
             print(f"[TELEGRAM FAILED] ID {chat_id}: {err}")
 
 # =====================================================================
+# 🌐 SHARED TELEMETRY STATE FOR INTERACTIVE COPILOT
+# =====================================================================
+latest_telemetry = {
+    'v_battery': 3.88,
+    'v_solar': 5.82,
+    'current_ma': 480.0,
+    'temp_bat': 30.5,
+    'real_power_w': 1.86,
+    'pred_soh': 94.0,
+    'backup_hours': 6,
+    'backup_mins': 40,
+    'wh_today': 14.5,
+    'tneb_units': 0.015,
+    'tneb_saved': 1.20,
+    'monthly_saved': 36.00,
+    'weather': {
+        'today_desc': 'Partly Cloudy',
+        'today_temp': 29.8,
+        'today_cloud': 65,
+        'tmrw_desc': 'Rainy & Cloudy 🌧️',
+        'tmrw_temp': 27.5,
+        'tmrw_cloud': 85,
+        'tmrw_rain_prob': 85,
+        'tmrw_rain_mm': 18.5,
+        'is_tmrw_rainy': True,
+        'is_tmrw_cloudy': True
+    }
+}
+
+# =====================================================================
+# 💬 TWO-WAY INTERACTIVE AI BATTERY DOCTOR (COPILOT)
+# =====================================================================
+def ask_ai_battery_doctor(user_question, telemetry):
+    """
+    Answers arbitrary user questions about appliances, battery runtime,
+    charging health, and weather preparation in English or Tamil.
+    """
+    v_bat   = telemetry['v_battery']
+    v_sol   = telemetry['v_solar']
+    cur_ma  = telemetry['current_ma']
+    temp_c  = telemetry['temp_bat']
+    p_w     = telemetry['real_power_w']
+    soh     = telemetry['pred_soh']
+    hrs     = telemetry['backup_hours']
+    mins    = telemetry['backup_mins']
+    wh_tot  = telemetry['wh_today']
+    weather = telemetry['weather']
+    thermal_status = "Safe" if temp_c < 38.0 else ("Warm" if temp_c < 45.0 else "Overheating")
+
+    # 1. Try Gemini AI for open-ended contextual reasoning
+    if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+
+            prompt = f"""
+You are "SolarBot", the intelligent AI Electrochemical Copilot & Battery Doctor for an 18650 Solar Battery System stationed in Salem, Tamil Nadu.
+
+LIVE SENSOR & WEATHER TELEMETRY:
+• Battery: {v_bat:.2f}V | Health (SoH): {soh:.0f}% | Cell Temp: {temp_c:.1f}°C ({thermal_status})
+• Current Draw: {cur_ma:.0f} mA | Load Power: {p_w:.2f} Watts
+• Estimated Backup: {hrs}h {mins}m tonight
+• Solar Harvest Today: {wh_tot:.1f} Wh (Panel Voltage: {v_sol:.2f}V)
+• Salem Weather Today: {weather['today_desc']} ({weather['today_temp']}°C, {weather['today_cloud']}% clouds)
+• Tomorrow's Forecast: {weather['tmrw_desc']}, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
+
+USER'S QUESTION:
+"{user_question}"
+
+INSTRUCTIONS:
+1. Provide a direct, helpful, expert response in 2-4 sentences with relevant emojis.
+2. If the user asks whether they can run a specific appliance (e.g. 10W fan, TV, lamp):
+   - Mathematically estimate if remaining battery capacity can sustain it.
+   - Cross-reference with tomorrow's forecast: If tomorrow is rainy/cloudy in Salem, advise conserving power tonight because solar recharging tomorrow will be low!
+3. If the user asks in Tamil or Tanglish, reply fluently and warmly in Tamil/Tanglish.
+4. If asked "status", "hi", or "report", give a concise 3-bullet snapshot.
+"""
+            res = model.generate_content(prompt)
+            if res and res.text:
+                return res.text.strip()
+        except Exception:
+            pass
+
+    # 2. Robust Built-in Smart Diagnostic Engine (Offline / Zero-API fallback)
+    text = user_question.lower()
+
+    # Tamil / Tanglish intent
+    if any(k in text for k in ['nalaiki', 'epdi', 'iruku', 'mazhai', 'sollu', 'vanakam', 'kaatru']):
+        return (
+            f"🔋 *பேட்டரி நிலை:* `{v_bat:.2f}V` (ஆரோக்கியம்: `{soh:.0f}%`, வெப்பம்: `{temp_c:.1f}°C`)\n"
+            f"⏳ *பேக்கப்:* `{hrs}h {mins}m` இன்றிரவு.\n"
+            f"🌧️ *நாளை சேலம் வானிலை:* `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% மழை வாய்ப்பு).\n"
+            f"💡 *ஆலோசனை:* நாளை சோலார் சார்ஜிங் குறைவாக இருக்கும், எனவே இன்றிரவு பேட்டரியை சிக்கனமாக பயன்படுத்தவும்!"
+        )
+
+    # Appliance / Load assessment query (e.g., "Can I run a 10W fan?")
+    watt_match = re.search(r'(\d+)\s*(w|watt)', text)
+    if watt_match or any(k in text for k in ['fan', 'light', 'lamp', 'tv', 'load', 'run', 'power', 'device']):
+        asked_watts = float(watt_match.group(1)) if watt_match else 10.0
+        usable_soc = max(0.05, min(1.0, (v_bat - 3.2) / (4.15 - 3.2)))
+        usable_wh = round(usable_soc * 8.5, 1)
+        run_h = usable_wh / max(0.1, asked_watts)
+        run_hours = int(run_h)
+        run_minutes = int((run_h - run_hours) * 60)
+
+        if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
+            weather_adv = f"⚠️ *Warning:* Tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain). Solar recharging will be poor tomorrow, so we advise keeping loads under 2W tonight!"
+        else:
+            weather_adv = f"☀️ Tomorrow's forecast is clear ({weather['tmrw_desc']}), so solar panels will easily replenish your battery tomorrow."
+
+        return (
+            f"⚡ *Appliance Assessment ({asked_watts:.0f}W):*\n"
+            f"At your current voltage ({v_bat:.2f}V, ~{usable_wh} Wh usable), a {asked_watts:.0f}W load will run for approx `{run_hours}h {run_minutes}m`.\n"
+            f"{weather_adv}"
+        )
+
+    # Status / Greeting query
+    if any(k in text for k in ['status', 'report', 'health', 'how is', 'check', 'hi', 'hello', 'start', 'help']):
+        return (
+            f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
+            f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Temp: `{temp_c:.1f}°C ({thermal_status})`\n"
+            f"• ⚡ *Real Load:* `{cur_ma:.0f} mA` ({p_w:.2f} W) | Backup: `{hrs}h {mins}m`\n"
+            f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n"
+            f"💬 *You can ask me questions like:*\n"
+            f"- _\"Can I run my 10W fan tonight?\"_\n"
+            f"- _\"Why is temperature high?\"_\n"
+            f"- _\"நாளைக்கு மழை பெய்யுமா?\"_"
+        )
+
+    # Temperature / Thermal query
+    if any(k in text for k in ['temp', 'heat', 'hot', 'thermal']):
+        return (
+            f"🌡️ *Thermal Diagnosis:* Battery temperature is `{temp_c:.1f}°C`.\n"
+            f"Optimal range for 18650 Li-ion is 20°C–35°C. " +
+            ("Cell is operating within safe thermal parameters." if temp_c < 38.0 else "Ensure adequate ventilation around the battery holder!")
+        )
+
+    # General fallback
+    return (
+        f"🔋 *Live Summary:* Battery is at `{v_bat:.2f}V` ({soh:.0f}% SoH) with `{hrs}h {mins}m` backup.\n"
+        f"Tomorrow's Salem forecast: `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% rain).\n"
+        f"💡 Ask me any question about your appliances, charging, or energy saving!"
+    )
+
+# =====================================================================
+# 🤖 BACKGROUND TELEGRAM CHATBOT LISTENER THREAD
+# =====================================================================
+def telegram_chatbot_worker():
+    """
+    Background worker that listens for incoming Telegram user messages
+    and responds instantly with AI Battery Doctor diagnostics and advice.
+    """
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN_HERE":
+        return
+
+    last_update_id = 0
+    print("[CHATBOT] Telegram Interactive AI Copilot is LIVE and listening for questions!\n")
+
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+            params = {"timeout": 4, "offset": last_update_id + 1}
+            res = requests.get(url, params=params, timeout=6).json()
+
+            if res.get("ok") and res.get("result"):
+                for update in res["result"]:
+                    last_update_id = update["update_id"]
+                    msg = update.get("message")
+                    if not msg or "text" not in msg:
+                        continue
+
+                    chat_id = str(msg["chat"]["id"])
+                    user_text = msg["text"].strip()
+                    user_name = msg.get("from", {}).get("first_name", "User")
+
+                    print(f"\n[CHATBOT QUESTION from {user_name} ({chat_id})]: '{user_text}'")
+
+                    # Generate AI Copilot Response
+                    ai_reply = ask_ai_battery_doctor(user_text, latest_telemetry)
+                    print(f"[CHATBOT AI REPLY]:\n{ai_reply}\n")
+
+                    # Send answer back to Telegram user
+                    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": ai_reply,
+                        "parse_mode": "Markdown"
+                    }
+                    requests.post(send_url, json=payload, timeout=6)
+
+        except Exception:
+            time.sleep(2)
+
+        time.sleep(1)
+
+# =====================================================================
 # 🔄 MAIN EXECUTION LOOP
 # =====================================================================
 def run_monitor():
@@ -348,7 +547,12 @@ def run_monitor():
 
     print("="*70)
     print(f"SOLAR BATTERY MONITOR & AUTOMATED MESSENGER ({LOCATION_NAME}, TN)")
+    print(f"Predictive Weather: {'SIMULATED RAIN/CLOUDS' if SIMULATE_RAINY_TOMORROW else 'LIVE SATELLITE'}")
     print("="*70 + "\n")
+
+    # Start 2-Way Interactive AI Chatbot Copilot Thread
+    chatbot_thread = threading.Thread(target=telegram_chatbot_worker, daemon=True)
+    chatbot_thread.start()
 
     try:
         while True:
@@ -398,6 +602,23 @@ def run_monitor():
 
             # 3. Weather for Salem (Live Today + Tomorrow Forecast)
             weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
+
+            # Update shared state for interactive chatbot copilot
+            latest_telemetry.update({
+                'v_battery': v_battery,
+                'v_solar': v_solar,
+                'current_ma': current_ma,
+                'temp_bat': temp_bat,
+                'real_power_w': round((v_battery * current_ma) / 1000.0, 2),
+                'pred_soh': pred_soh,
+                'backup_hours': backup_hours,
+                'backup_mins': backup_mins,
+                'wh_today': wh_generated,
+                'tneb_units': tneb_units,
+                'tneb_saved': tneb_saved,
+                'monthly_saved': monthly_save,
+                'weather': weather_info
+            })
 
             # Stream to local terminal
             print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Load: {current_ma:.0f}mA | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")

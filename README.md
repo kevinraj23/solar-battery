@@ -86,7 +86,27 @@ python live_monitor.py
 • 🔮 Tomorrow Forecast: Rainy & Cloudy 🌧️ • Rain Chance 85%
 • 💡 Smart Advice: ⚠️ Tomorrow is forecast to be Rainy & Cloudy in Salem (85% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!
 ```
+---
+
+## 💬 Two-Way Interactive AI Battery Doctor (Chatbot)
+
+Users can chat directly with the bot on Telegram (`@mysolar_battery_health_bot`) to get instant answers regarding appliances, battery health, and weather preparation in **English or Tamil**:
+
+### 🗣️ Example Chat Interactions:
+* **Load Estimation:**
+  > **User:** *"Can I run a 10W fan tonight?"*  
+  > **AI Doctor:** *"⚡ At current voltage (3.88V, ~6.1 Wh usable), a 10W load will run for approx 0h 36m. ⚠️ Warning: Tomorrow in Salem is forecast to be Rainy & Cloudy 🌧️ (85% rain). Solar recharging will be poor tomorrow, so we advise keeping loads under 2W tonight!"*
+
+* **Thermal & Health Diagnostics:**
+  > **User:** *"Why is cell temperature 31°C?"*  
+  > **AI Doctor:** *"🌡️ Battery temperature is 31.2°C. The optimal range for 18650 Li-ion is 20°C–35°C. The cell is operating within safe thermal parameters with zero thermal degradation."*
+
+* **Regional Language (Tamil / Tanglish):**
+  > **User:** *"Nalaiki mazhai peyyuma, battery epdi iruku?"*  
+  > **AI Doctor:** *"🔋 பேட்டரி நிலை: 3.88V (ஆரோக்கியம்: 94%, வெப்பம்: 30.5°C). ⏳ பேக்கப்: 6h 40m. 🌧️ நாளை சேலம் வானிலை: Rainy & Cloudy (85% மழை). சோலார் சார்ஜிங் குறைவாக இருக்கும், எனவே இன்றிரவு சிக்கனமாக பயன்படுத்தவும்!"*
 
 ---
 
-
+## 👥 Authors
+Developed for Engineering Mini-Project:  
+**Solar Battery Health Monitor and Automated Messenger**
