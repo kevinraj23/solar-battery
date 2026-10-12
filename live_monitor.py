@@ -67,6 +67,11 @@ REPORT_INTERVAL_SECONDS = 60  # Sends update every 60 seconds (set to 300 for 5 
 # Set to False to fetch live satellite forecast from Open-Meteo for Salem.
 SIMULATE_RAINY_TOMORROW = True
 
+# 8. Solar Panel Dust / Soiling Detection & Demo Mode
+# Set to True to immediately demonstrate the "Panel Dust / Dirty Glass Alert"!
+# Set to False to dynamically calculate from live satellite solar irradiance vs panel output.
+SIMULATE_DUSTY_PANEL = True
+
 # =====================================================================
 # 🧠 LOAD TRAINED MACHINE LEARNING MODEL
 # =====================================================================
@@ -186,14 +191,60 @@ def get_live_weather(lat, lon, simulate_rainy=False):
         }
 
 # =====================================================================
+# ☀️ SOLAR PANEL OPTICAL SOILING & DUST DETECTION ENGINE
+# =====================================================================
+def evaluate_panel_soiling(v_solar, irradiance, simulate_dust=False):
+    """
+    Senses optical soiling and dust accumulation on solar panel glass
+    by comparing panel output against satellite direct solar irradiance.
+    """
+    if simulate_dust:
+        return {
+            'cleanliness_pct': 42,
+            'is_dusty': True,
+            'status': 'Dust Detected 🧹',
+            'loss_pct': 58,
+            'loss_watts': 1.4,
+            'irradiance': 780.0
+        }
+
+    # At night or very weak sun (< 120 W/m²), optical soiling cannot be reliably assessed
+    if irradiance < 120.0:
+        return {
+            'cleanliness_pct': 96,
+            'is_dusty': False,
+            'status': 'Night / Low Sunlight 🌙',
+            'loss_pct': 0,
+            'loss_watts': 0.0,
+            'irradiance': irradiance
+        }
+
+    # Expected voltage for 6V 3W panel under sunshine
+    expected_v = min(5.8, max(3.5, 3.5 + (irradiance / 1000.0) * 2.3))
+    ratio = min(1.0, max(0.2, v_solar / expected_v))
+    cleanliness = int(ratio * 100)
+    is_dusty = cleanliness < 65
+    loss_pct = max(0, 100 - cleanliness)
+    loss_watts = round((loss_pct / 100.0) * 2.8, 2)
+
+    return {
+        'cleanliness_pct': cleanliness,
+        'is_dusty': is_dusty,
+        'status': 'Dust Detected 🧹' if is_dusty else 'Clean & Optimal ✨',
+        'loss_pct': loss_pct,
+        'loss_watts': loss_watts,
+        'irradiance': irradiance
+    }
+
+# =====================================================================
 # 💡 DYNAMIC SMART ADVICE ENGINE (PREDICTIVE & CONTEXT-AWARE)
 # =====================================================================
 advice_counter = 0
 
-def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_ma=480.0):
+def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_ma=480.0, panel_dust=None):
     """
     Generates intelligent, non-repetitive advice based on battery health,
-    temperature safety, load current, and tomorrow's forecast (e.g., Rainy/Cloudy -> Use Wisely).
+    panel dust accumulation, temperature safety, load current, and tomorrow's forecast.
     """
     global advice_counter
     advice_counter += 1
@@ -208,8 +259,14 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
     if v_bat < 3.3:
         return f"⚠️ Low battery warning ({v_bat:.2f}V)! Disconnect {current_ma:.0f}mA load now to prevent deep discharge."
 
-    # 3. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
-    # Conserve energy because tomorrow's solar generation will be low
+    # 3. AUTOMATIC DUST / SOILING DETECTION ALERT
+    if panel_dust and panel_dust.get('is_dusty'):
+        if weather.get('is_tmrw_rainy'):
+            return f"🧹 Panel Dust Detected (-{panel_dust['loss_pct']}% generation loss). However, tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain chance) — natural rainwater will wash it clean, no manual wiping needed!"
+        else:
+            return f"🧹 Panel Dust Alert: Solar panel output is {panel_dust['loss_pct']}% below expected under bright sunlight! Wipe panel glass with a soft damp cloth today to restore full charging speed."
+
+    # 4. PREDICTIVE ALERT: Tomorrow is Rainy & Cloudy!
     if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
         rainy_cloudy_pool = [
             f"🌧️ Tomorrow is forecast to be {weather['tmrw_desc']} in Salem ({weather['tmrw_rain_prob']}% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!",
@@ -219,7 +276,7 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
         ]
         return rainy_cloudy_pool[advice_counter % len(rainy_cloudy_pool)]
 
-    # 4. OPTIMAL ALERT: Tomorrow is Sunny & Clear!
+    # 5. OPTIMAL ALERT: Tomorrow is Sunny & Clear!
     if not weather.get('is_tmrw_rainy') and not weather.get('is_tmrw_cloudy'):
         sunny_pool = [
             f"☀️ Ample sunshine forecasted tomorrow in Salem ({weather['tmrw_temp']}°C). Full solar recharge expected tomorrow, so safe to utilize your normal battery backup tonight.",
@@ -235,10 +292,11 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5):
-    """Formats the clean, beautiful report for Salem including telemetry, thermal health, and tomorrow's forecast."""
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5, panel_dust=None):
+    """Formats the clean, beautiful report for Salem including telemetry, panel dust status, thermal health, and tomorrow's forecast."""
     real_power_w = round((v_bat * current_ma) / 1000.0, 2)
     thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
+    panel_status_str = f"{panel_dust['cleanliness_pct']}% ({panel_dust['status']})" if panel_dust else "Clean ✨"
     
     # 1. Try Gemini AI if API key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
@@ -252,18 +310,19 @@ You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Me
 Telemetry:
 - Battery Voltage: {v_bat:.2f}V | Current Draw: {current_ma:.0f}mA ({real_power_w:.2f}W) | Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 - Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
-- Solar Energy Harvested: {wh_today:.1f} Wh | TNEB Units: {tneb_units:.3f} | Saved: Rs {tneb_saved:.2f} (Rs {monthly_saved:.2f}/mo)
+- Solar Panel: {wh_today:.1f} Wh harvested today | Panel Cleanliness: {panel_status_str}
+- TNEB Units: {tneb_units:.3f} | Saved: Rs {tneb_saved:.2f} (Rs {monthly_saved:.2f}/mo)
 - Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
 - Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
 Generate EXACTLY these 7 bullet points with clear formatting and NO conversational opening:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
 • ⚡ *Real Load:* {current_ma:.0f} mA ({real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
-• ☀️ *Solar Energy:* {wh_today:.1f} Wh generated today
+• ☀️ *Solar Panel:* {wh_today:.1f} Wh generated • Cleanliness: {panel_status_str}
 • 💰 *TNEB Savings:* {tneb_units:.3f} Units • Saved ₹{tneb_saved:.2f} today (₹{monthly_saved:.2f}/mo)
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
 • 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
-• 💡 *Smart Advice:* [Write 1 fresh, practical tip. IMPORTANT: If tomorrow is rainy or cloudy, explicitly advise the user: 'Tomorrow weather is rainy and cloudy, so use battery power wisely tonight!' because solar charging will be low tomorrow]
+• 💡 *Smart Advice:* [Write 1 fresh, practical tip. If panel is dusty, alert user to clean it or mention if tomorrow's rain will clean it! If tomorrow is rainy/cloudy, advise using power wisely tonight]
 """
             res = model.generate_content(prompt)
             if res and res.text:
@@ -272,12 +331,12 @@ Generate EXACTLY these 7 bullet points with clear formatting and NO conversation
             pass
 
     # 2. Robust Built-in Dynamic Formatter (Zero-repetition, perfect predictive structure)
-    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=temp_bat, current_ma=current_ma)
+    smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=temp_bat, current_ma=current_ma, panel_dust=panel_dust)
 
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Healthy) • `{hours}h {mins}m backup tonight`\n"
         f"• ⚡ *Real Load:* `{current_ma:.0f} mA` ({real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
-        f"• ☀️ *Solar Energy:* `{wh_today:.1f} Wh` generated today\n"
+        f"• ☀️ *Solar Panel:* `{wh_today:.1f} Wh` • Cleanliness: `{panel_status_str}`\n"
         f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
         f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
@@ -356,6 +415,14 @@ latest_telemetry = {
         'tmrw_rain_mm': 18.5,
         'is_tmrw_rainy': True,
         'is_tmrw_cloudy': True
+    },
+    'panel_dust': {
+        'cleanliness_pct': 42,
+        'is_dusty': True,
+        'status': 'Dust Detected 🧹',
+        'loss_pct': 58,
+        'loss_watts': 1.4,
+        'irradiance': 780.0
     }
 }
 
@@ -377,6 +444,7 @@ def ask_ai_battery_doctor(user_question, telemetry):
     mins    = telemetry['backup_mins']
     wh_tot  = telemetry['wh_today']
     weather = telemetry['weather']
+    panel_dust = telemetry.get('panel_dust', {'cleanliness_pct': 42, 'is_dusty': True, 'status': 'Dust Detected 🧹', 'loss_pct': 58, 'loss_watts': 1.4})
     thermal_status = "Safe" if temp_c < 38.0 else ("Warm" if temp_c < 45.0 else "Overheating")
 
     # 1. Try Gemini AI for open-ended contextual reasoning
@@ -393,7 +461,7 @@ LIVE SENSOR & WEATHER TELEMETRY:
 • Battery: {v_bat:.2f}V | Health (SoH): {soh:.0f}% | Cell Temp: {temp_c:.1f}°C ({thermal_status})
 • Current Draw: {cur_ma:.0f} mA | Load Power: {p_w:.2f} Watts
 • Estimated Backup: {hrs}h {mins}m tonight
-• Solar Harvest Today: {wh_tot:.1f} Wh (Panel Voltage: {v_sol:.2f}V)
+• Solar Panel: {wh_tot:.1f} Wh | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']}) | Optical Loss: -{panel_dust['loss_pct']}%
 • Salem Weather Today: {weather['today_desc']} ({weather['today_temp']}°C, {weather['today_cloud']}% clouds)
 • Tomorrow's Forecast: {weather['tmrw_desc']}, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
@@ -402,11 +470,14 @@ USER'S QUESTION:
 
 INSTRUCTIONS:
 1. Provide a direct, helpful, expert response in 2-4 sentences with relevant emojis.
-2. If the user asks whether they can run a specific appliance (e.g. 10W fan, TV, lamp):
+2. If user asks about the solar panel, dust, cleanliness, or cleaning:
+   - Report the cleanliness score and optical loss.
+   - If tomorrow's forecast is rain, mention that natural rain will wash it clean! Otherwise, advise wiping with a damp cloth.
+3. If the user asks whether they can run a specific appliance (e.g. 10W fan, TV, lamp):
    - Mathematically estimate if remaining battery capacity can sustain it.
    - Cross-reference with tomorrow's forecast: If tomorrow is rainy/cloudy in Salem, advise conserving power tonight because solar recharging tomorrow will be low!
-3. If the user asks in Tamil or Tanglish, reply fluently and warmly in Tamil/Tanglish.
-4. If asked "status", "hi", or "report", give a concise 3-bullet snapshot.
+4. If the user asks in Tamil or Tanglish, reply fluently and warmly in Tamil/Tanglish.
+5. If asked "status", "hi", or "report", give a concise snapshot.
 """
             res = model.generate_content(prompt)
             if res and res.text:
@@ -417,7 +488,24 @@ INSTRUCTIONS:
     # 2. Robust Built-in Smart Diagnostic Engine (Offline / Zero-API fallback)
     text = user_question.lower()
 
-    # Tamil / Tanglish intent
+    # Solar Panel & Dust / Soiling query (e.g., "is panel dusty?", "panel health", "clean panel", "thusi")
+    if any(k in text for k in ['dust', 'dirty', 'clean', 'panel', 'soiling', 'wash', 'wipe', 'thusi', 'kannaadi']):
+        if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
+            return (
+                f"🧹 *சோலார் பேனல் தூய்மை நிலை:*\n"
+                f"பேனல் கண்ணாடியில் தூசி படிந்துள்ளது (தூய்மை: `{panel_dust['cleanliness_pct']}%`).\n"
+                f"இதனால் சோலார் மின் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
+                f"💡 *ஆலோசனை:* கண்ணாடியை மெல்லிய ஈரத்துணியால் துடைத்தால் சார்ஜிங் உடனடியாக அதிகரிக்கும்!"
+            )
+        rain_note = "Tomorrow's rain will naturally wash your panel clean!" if weather.get('is_tmrw_rainy') else "Wipe the panel glass with a soft damp microfiber cloth today to recover full 3W solar generation!"
+        return (
+            f"🧹 *Solar Panel Cleanliness Diagnosis:*\n"
+            f"• Cleanliness Score: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
+            f"• Optical Loss: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W lost under sunshine)\n"
+            f"💡 *Recommendation:* {rain_note}"
+        )
+
+    # General Tamil / Tanglish intent
     if any(k in text for k in ['nalaiki', 'epdi', 'iruku', 'mazhai', 'sollu', 'vanakam', 'kaatru']):
         return (
             f"🔋 *பேட்டரி நிலை:* `{v_bat:.2f}V` (ஆரோக்கியம்: `{soh:.0f}%`, வெப்பம்: `{temp_c:.1f}°C`)\n"
@@ -453,10 +541,11 @@ INSTRUCTIONS:
             f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
             f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Temp: `{temp_c:.1f}°C ({thermal_status})`\n"
             f"• ⚡ *Real Load:* `{cur_ma:.0f} mA` ({p_w:.2f} W) | Backup: `{hrs}h {mins}m`\n"
+            f"• ☀️ *Solar Panel:* `{wh_tot:.1f} Wh` | Cleanliness: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
             f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n"
             f"💬 *You can ask me questions like:*\n"
+            f"- _\"Is my solar panel dirty?\"_\n"
             f"- _\"Can I run my 10W fan tonight?\"_\n"
-            f"- _\"Why is temperature high?\"_\n"
             f"- _\"நாளைக்கு மழை பெய்யுமா?\"_"
         )
 
@@ -472,7 +561,7 @@ INSTRUCTIONS:
     return (
         f"🔋 *Live Summary:* Battery is at `{v_bat:.2f}V` ({soh:.0f}% SoH) with `{hrs}h {mins}m` backup.\n"
         f"Tomorrow's Salem forecast: `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% rain).\n"
-        f"💡 Ask me any question about your appliances, charging, or energy saving!"
+        f"💡 Ask me any question about your appliances, panel dust, charging, or energy saving!"
     )
 
 # =====================================================================
@@ -603,6 +692,9 @@ def run_monitor():
             # 3. Weather for Salem (Live Today + Tomorrow Forecast)
             weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
 
+            # 4. Solar Panel Optical Dust & Soiling Detection
+            panel_dust = evaluate_panel_soiling(v_solar, weather_info['today_irradiance'], simulate_dust=SIMULATE_DUSTY_PANEL)
+
             # Update shared state for interactive chatbot copilot
             latest_telemetry.update({
                 'v_battery': v_battery,
@@ -617,13 +709,14 @@ def run_monitor():
                 'tneb_units': tneb_units,
                 'tneb_saved': tneb_saved,
                 'monthly_saved': monthly_save,
-                'weather': weather_info
+                'weather': weather_info,
+                'panel_dust': panel_dust
             })
 
             # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V | Load: {current_ma:.0f}mA | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V (Dust: {panel_dust['cleanliness_pct']}%) | Load: {current_ma:.0f}mA | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
 
-            # 4. Generate & Send Predictive Report
+            # 5. Generate & Send Predictive Report
             current_time = time.time()
             if (current_time - last_report_timestamp) >= REPORT_INTERVAL_SECONDS:
                 last_report_timestamp = current_time
@@ -639,7 +732,8 @@ def run_monitor():
                     monthly_saved=monthly_save,
                     weather=weather_info,
                     current_ma=current_ma,
-                    temp_bat=temp_bat
+                    temp_bat=temp_bat,
+                    panel_dust=panel_dust
                 )
 
                 print("\n" + "="*65)

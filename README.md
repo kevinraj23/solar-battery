@@ -80,19 +80,23 @@ python live_monitor.py
 ────────────────────────────────
 • 🔋 Battery Health: 94% (Healthy) • 6h 40m backup tonight
 • ⚡ Real Load: 480 mA (1.85 W) • Cell Temp: 31.2°C (Safe)
-• ☀️ Solar Energy: 14.5 Wh generated today
+• ☀️ Solar Panel: 14.5 Wh • Cleanliness: 42% (Dust Detected 🧹)
 • 💰 TNEB Savings: 0.015 Units • Saved ₹1.20 today (₹36.00/mo)
 • ⛅ Salem Weather: Today: Partly Cloudy (29.8°C) • Cloud Cover 65%
 • 🔮 Tomorrow Forecast: Rainy & Cloudy 🌧️ • Rain Chance 85%
-• 💡 Smart Advice: ⚠️ Tomorrow is forecast to be Rainy & Cloudy in Salem (85% rain chance). Solar charging will be minimal tomorrow—use battery power wisely tonight and switch off non-essential loads!
+• 💡 Smart Advice: 🧹 Panel Dust Detected (-58% loss). However, tomorrow in Salem is forecast to be Rainy (85% rain) — natural rainwater will wash it clean, no manual wiping needed!
 ```
 ---
 
 ## 💬 Two-Way Interactive AI Battery Doctor (Chatbot)
 
-Users can chat directly with the bot on Telegram (`@mysolar_battery_health_bot`) to get instant answers regarding appliances, battery health, and weather preparation in **English or Tamil**:
+Users can chat directly with the bot on Telegram (`@mysolar_battery_health_bot`) to get instant answers regarding appliances, battery health, **solar panel dust/cleanliness**, and weather preparation in **English or Tamil**:
 
 ### 🗣️ Example Chat Interactions:
+* **Solar Panel Dust & Cleanliness Check:**
+  > **User:** *"Is my solar panel dirty?"*  
+  > **AI Doctor:** *"🧹 Solar Panel Health Check: Cleanliness Score: 42% (Dust Detected 🧹). Optical generation loss is -58% (~1.4W lost under sunshine). 💡 Recommendation: Tomorrow's rain will naturally wash your panel clean!"*
+
 * **Load Estimation:**
   > **User:** *"Can I run a 10W fan tonight?"*  
   > **AI Doctor:** *"⚡ At current voltage (3.88V, ~6.1 Wh usable), a 10W load will run for approx 0h 36m. ⚠️ Warning: Tomorrow in Salem is forecast to be Rainy & Cloudy 🌧️ (85% rain). Solar recharging will be poor tomorrow, so we advise keeping loads under 2W tonight!"*
@@ -102,8 +106,8 @@ Users can chat directly with the bot on Telegram (`@mysolar_battery_health_bot`)
   > **AI Doctor:** *"🌡️ Battery temperature is 31.2°C. The optimal range for 18650 Li-ion is 20°C–35°C. The cell is operating within safe thermal parameters with zero thermal degradation."*
 
 * **Regional Language (Tamil / Tanglish):**
-  > **User:** *"Nalaiki mazhai peyyuma, battery epdi iruku?"*  
-  > **AI Doctor:** *"🔋 பேட்டரி நிலை: 3.88V (ஆரோக்கியம்: 94%, வெப்பம்: 30.5°C). ⏳ பேக்கப்: 6h 40m. 🌧️ நாளை சேலம் வானிலை: Rainy & Cloudy (85% மழை). சோலார் சார்ஜிங் குறைவாக இருக்கும், எனவே இன்றிரவு சிக்கனமாக பயன்படுத்தவும்!"*
+  > **User:** *"Solar panel la thusi iruka, sollu?"*  
+  > **AI Doctor:** *"🧹 சோலார் பேனல் நிலை: பேனல் கண்ணாடியில் தூசி படிந்துள்ளது (தூய்மை: 42%). இதனால் சோலார் மின் உற்பத்தி -58% குறைந்துள்ளது. கண்ணாடியை மெல்லிய ஈரத்துணியால் துடைக்கவும்!"*
 
 ---
 
