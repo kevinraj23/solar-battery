@@ -1,54 +1,78 @@
-// Solar Battery Health Monitor and Automated Messenger
-// Edge Firmware for Arduino Nano (4-Channel Telemetry)
-// Channels: Battery Voltage, Solar Voltage, Load Current, Cell Temperature
+// =====================================================================
+// Project: Solar Battery Health Monitor and Automated Messenger
+// Platform: Arduino Nano / Uno (ATmega328P)
+// Description: 4-Channel Precision Edge Telemetry Firmware
+// NO EXTERNAL LIBRARIES REQUIRED - Compiles out of the box!
+// =====================================================================
 
-const int BATTERY_PIN = A0;  // 18650 Battery Voltage (via 10k protection resistor)
-const int SOLAR_PIN   = A1;  // Solar Panel Voltage (via 10k:10k divider)
-const int CURRENT_PIN = A2;  // ACS712-05A Current Sensor OUT
-const int TEMP_PIN    = A3;  // LM35 Temperature Sensor VOUT
+// Pin Definitions
+const int PIN_BATTERY = A0;  // 18650 Battery Voltage (direct via 10k protection resistor)
+const int PIN_SOLAR   = A1;  // Solar Panel Voltage (via 10k:10k voltage divider)
+const int PIN_CURRENT = A2;  // ACS712-05A Current Sensor OUT
+const int PIN_TEMP    = A3;  // LM35 Temperature Sensor VOUT
+const int PIN_LED     = 13;  // Built-in status LED heartbeat
 
-const float V_REF = 5.00;             // Arduino Nano 5.0V Logic
+// Hardware Calibration Constants
+const float V_REF = 5.00;              // Microcontroller operating voltage
 const float SOLAR_DIVIDER_RATIO = 2.0; // Two equal 10k resistors divide voltage by 2
-
-// ACS712 5A Sensitivity: 185 mV per Ampere (0.185V/A)
-// At 0A, output is V_REF / 2 = 2.50V (ADC ~ 512)
-const float ACS_OFFSET_V = 2.50;
-const float ACS_SENSITIVITY = 0.185; 
+const float ACS_OFFSET_V = 2.50;       // ACS712 0A resting midpoint (VCC / 2)
+const float ACS_SENSITIVITY = 0.185;   // ACS712-05A: 185 mV/A (0.185 V/A)
 
 void setup() {
+  pinMode(PIN_LED, OUTPUT);
   Serial.begin(9600); // 9600 Baud Rate matches Python live_monitor.py
+  
+  // Power-on stabilization delay
   delay(1000);
 }
 
 void loop() {
-  // Average 15 samples to eliminate analog noise
-  float rawBat = 0, rawSol = 0, rawCur = 0, rawTmp = 0;
-  for(int i = 0; i < 15; i++) {
-    rawBat += analogRead(BATTERY_PIN);
-    rawSol += analogRead(SOLAR_PIN);
-    rawCur += analogRead(CURRENT_PIN);
-    rawTmp += analogRead(TEMP_PIN);
-    delay(10);
+  // Blink LED to indicate active sampling & transmission
+  digitalWrite(PIN_LED, HIGH);
+
+  // Take 20 analog samples to average out high-frequency electrical noise
+  float sumBat = 0.0, sumSol = 0.0, sumCur = 0.0, sumTmp = 0.0;
+  const int NUM_SAMPLES = 20;
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    // Read each analog pin with a small settling delay between channels
+    sumBat += analogRead(PIN_BATTERY);
+    delayMicroseconds(200);
+    sumSol += analogRead(PIN_SOLAR);
+    delayMicroseconds(200);
+    sumCur += analogRead(PIN_CURRENT);
+    delayMicroseconds(200);
+    sumTmp += analogRead(PIN_TEMP);
+    delay(5);
   }
-  rawBat /= 15.0;
-  rawSol /= 15.0;
-  rawCur /= 15.0;
-  rawTmp /= 15.0;
 
-  // 1. Voltages (V)
-  float vBattery = (rawBat * V_REF) / 1024.0;
-  float vSolar   = ((rawSol * V_REF) / 1024.0) * SOLAR_DIVIDER_RATIO;
+  // Calculate averaged analog ADC values (0 to 1023)
+  float avgBat = sumBat / NUM_SAMPLES;
+  float avgSol = sumSol / NUM_SAMPLES;
+  float avgCur = sumCur / NUM_SAMPLES;
+  float avgTmp = sumTmp / NUM_SAMPLES;
 
-  // 2. Load Current (mA) using ACS712
-  float vSensorCur = (rawCur * V_REF) / 1024.0;
-  float currentAmps = (vSensorCur - ACS_OFFSET_V) / ACS_SENSITIVITY;
-  float current_mA = abs(currentAmps * 1000.0); // Absolute load current in mA
+  // 1. Calculate 18650 Battery Voltage (V)
+  float vBattery = (avgBat * V_REF) / 1023.0;
 
-  // 3. Cell Temperature (°C) using LM35 (10 mV per °C)
-  float vTemp = (rawTmp * V_REF) / 1024.0;
-  float temp_celsius = vTemp * 100.0; // 0.1V = 10°C, 0.3V = 30°C
+  // 2. Calculate Solar Panel Voltage (V)
+  float vSolar = ((avgSol * V_REF) / 1023.0) * SOLAR_DIVIDER_RATIO;
 
-  // Transmit 4-Channel CSV to Python Gateway:
+  // 3. Calculate Real Load Current (mA) using ACS712
+  float vCurSensor = (avgCur * V_REF) / 1023.0;
+  float currentAmps = (vCurSensor - ACS_OFFSET_V) / ACS_SENSITIVITY;
+  float current_mA = abs(currentAmps * 1000.0);
+  
+  // Noise deadband: suppress minor sensor jitter below 40mA when load is disconnected
+  if (current_mA < 40.0) {
+    current_mA = 0.0;
+  }
+
+  // 4. Calculate Cell Surface Temperature (°C) using LM35 (10 mV per °C)
+  float vTemp = (avgTmp * V_REF) / 1023.0;
+  float temp_celsius = vTemp * 100.0;
+
+  // Transmit 4-Channel CSV string to Python Gateway
   // Format: "V_BATTERY,V_SOLAR,CURRENT_MA,TEMP_CELSIUS"
   Serial.print(vBattery, 3);
   Serial.print(",");
@@ -58,5 +82,9 @@ void loop() {
   Serial.print(",");
   Serial.println(temp_celsius, 1);
 
-  delay(2000); // Send reading every 2 seconds
+  // Turn off LED after transmission
+  digitalWrite(PIN_LED, LOW);
+
+  // Send update every 2 seconds
+  delay(2000);
 }
