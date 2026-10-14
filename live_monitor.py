@@ -60,7 +60,7 @@ LATITUDE      = 11.6643
 LONGITUDE     = 78.1460
 
 # 6. Reporting Interval (in seconds)
-REPORT_INTERVAL_SECONDS = 60  # Sends update every 60 seconds (set to 300 for 5 mins)
+REPORT_INTERVAL_SECONDS = 3600  # Sends automated report every 1 hour (use /report on Telegram for on-demand reports)
 
 # 7. Tomorrow Weather Simulation / Demo Mode
 # Set to True to immediately demonstrate the "Rainy & Cloudy -> Use Wisely" alert!
@@ -329,13 +329,10 @@ def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_s
     thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
     panel_status_str = f"{panel_dust['cleanliness_pct']}% ({panel_dust['status']})" if panel_dust else "Clean ✨"
     
-    # 1. Try Gemini AI if API key is provided
+    # 1. Try Gemini AI via REST API if key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
             prompt = f"""
 You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Messenger' stationed in Salem, Tamil Nadu.
 Telemetry:
@@ -348,16 +345,20 @@ Telemetry:
 
 Generate EXACTLY these 7 bullet points with clear formatting and NO conversational opening:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
-• ⚡ *Real Load:* {current_ma:.0f} mA ({real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
+• ⚡ *Real Load:* {current_mode} ({abs(current_ma):.0f} mA, {real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 • ☀️ *Solar Panel:* {wh_today:.1f} Wh generated • Cleanliness: {panel_status_str}
 • 💰 *TNEB Savings:* {tneb_units:.3f} Units • Saved ₹{tneb_saved:.2f} today (₹{monthly_saved:.2f}/mo)
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
 • 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
 • 💡 *Smart Advice:* [Write 1 fresh, practical tip. If panel is dusty, alert user to clean it or mention if tomorrow's rain will clean it! If tomorrow is rainy/cloudy, advise using power wisely tonight]
 """
-            res = model.generate_content(prompt)
-            if res and res.text:
-                return res.text.strip()
+            r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=4)
+            if r.status_code == 200:
+                cands = r.json().get('candidates', [])
+                if cands:
+                    txt = cands[0].get('content', {}).get('parts', [{}])[0].get('text')
+                    if txt:
+                        return txt.strip()
         except Exception as e:
             print(f"[AI REPORT INFO] Gemini API unavailable ({e}). Using dynamic engine.")
 
@@ -479,166 +480,210 @@ def ask_ai_battery_doctor(user_question, telemetry):
     hrs     = telemetry['backup_hours']
     mins    = telemetry['backup_mins']
     wh_tot  = telemetry['wh_today']
+    tneb_u  = telemetry.get('tneb_units', round(wh_tot / 1000.0, 3))
+    tneb_rs = telemetry.get('tneb_saved', round(tneb_u * 8.0, 2))
+    monthly = telemetry.get('monthly_saved', round(tneb_rs * 30.0, 2))
     weather = telemetry['weather']
+    mode    = telemetry.get('current_mode', 'Discharging 🔋')
     panel_dust = telemetry.get('panel_dust', {'cleanliness_pct': 42, 'is_dusty': True, 'status': 'Dust Detected 🧹', 'loss_pct': 58, 'loss_watts': 1.4})
     thermal_status = "Safe" if temp_c < 38.0 else ("Warm" if temp_c < 45.0 else "Overheating")
 
-    # 1. Try Gemini AI for open-ended contextual reasoning
+    # 1. Try Gemini AI REST API for open-ended contextual reasoning
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = f"""
+You are "SolarBot", the friendly and intelligent 2-way conversational AI Copilot & Battery Doctor for an 18650 Solar Battery System in Salem, Tamil Nadu.
 
-            prompt = f"""
-You are "SolarBot", the intelligent AI Electrochemical Copilot & Battery Doctor for an 18650 Solar Battery System stationed in Salem, Tamil Nadu.
+LIVE TELEMETRY:
+• Battery: {v_bat:.2f}V | Health: {soh:.0f}% (Healthy) | Cell Temp: {temp_c:.1f}°C ({thermal_status})
+• State: {mode} | Real Load: {cur_ma:.0f} mA ({p_w:.2f} W) | Usable Backup: {hrs}h {mins}m tonight
+• Solar Generation Today: {wh_tot:.1f} Wh | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']})
+• Electricity Savings: {tneb_u:.3f} Units saved today (₹{tneb_rs:.2f} today, ₹{monthly:.2f}/mo)
+• Weather in Salem: Today {weather['today_desc']} ({weather['today_temp']}°C), Tomorrow {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain probability, {weather.get('tmrw_rain_mm', 18.5)} mm expected rain)
 
-LIVE SENSOR & WEATHER TELEMETRY:
-• Battery: {v_bat:.2f}V | Health (SoH): {soh:.0f}% | Cell Temp: {temp_c:.1f}°C ({thermal_status})
-• Current Draw: {cur_ma:.0f} mA | Load Power: {p_w:.2f} Watts
-• Estimated Backup: {hrs}h {mins}m tonight
-• Solar Panel: {wh_tot:.1f} Wh | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']}) | Optical Loss: -{panel_dust['loss_pct']}%
-• Salem Weather Today: {weather['today_desc']} ({weather['today_temp']}°C, {weather['today_cloud']}% clouds)
-• Tomorrow's Forecast: {weather['tmrw_desc']}, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
-
-USER'S QUESTION:
+USER MESSAGE:
 "{user_question}"
 
 INSTRUCTIONS:
-1. Provide a direct, helpful, expert response in 2-4 sentences with relevant emojis.
-2. If user asks about the solar panel, dust, cleanliness, or cleaning:
-   - Report the cleanliness score and optical loss.
-   - If tomorrow's forecast is rain, mention that natural rain will wash it clean! Otherwise, advise wiping with a damp cloth.
-3. If the user asks whether they can run a specific appliance (e.g. 10W fan, TV, lamp):
-   - Mathematically estimate if remaining battery capacity can sustain it.
-   - Cross-reference with tomorrow's forecast: If tomorrow is rainy/cloudy in Salem, advise conserving power tonight because solar recharging tomorrow will be low!
-4. If the user asks in Tamil or Tanglish, reply fluently and warmly in Tamil/Tanglish.
-5. If asked "status", "hi", or "report", give a concise snapshot.
+1. You are having an interactive 2-way chat on Telegram. Directly answer the user's specific question in 2-3 friendly, helpful sentences with emojis.
+2. Understand Tamil & Tanglish colloquial queries:
+   - "nakaliku raina" / "naalaiku mazhaiya" means "will it rain tomorrow?". Explain Salem's rain forecast for tomorrow ({weather['tmrw_desc']}, {weather['tmrw_rain_prob']}% rain) and advise them to conserve battery backup.
+   - "ena nadakuthu" / "enna aachu" means "what is happening / what is the live status?". Give a friendly conversational summary of battery voltage, backup time, and solar generation.
+   - "what other thing you can do" / "what else you can do" means what are your features. List 4 things you can do (appliance runtime calculator, solar generation check, electricity savings tracker, weather alert).
+3. If the user asks in Tanglish or Tamil, reply warmly in friendly Tanglish / Tamil. If in English, reply in English.
+4. If they ask about running appliances (e.g., fan, light, TV), calculate whether the current {hrs}h {mins}m backup can support it and advise accordingly.
 """
-            res = model.generate_content(prompt)
-            if res and res.text:
-                return res.text.strip()
-        except Exception as e:
-            print(f"[AI COPILOT INFO] Gemini API unavailable ({e}). Using offline diagnostic engine.")
+        models_to_try = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+        for m in models_to_try:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={GEMINI_API_KEY}"
+                r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=3)
+                if r.status_code == 200:
+                    cands = r.json().get('candidates', [])
+                    if cands:
+                        txt = cands[0].get('content', {}).get('parts', [{}])[0].get('text')
+                        if txt:
+                            return txt.strip()
+            except Exception:
+                continue
 
-    # 2. Robust Built-in Smart Diagnostic Engine (Offline / Zero-API fallback)
-    text = user_question.lower()
+    # 2. Robust Built-in 2-Way Conversational Engine (Zero-Latency Offline Fallback)
+    text = user_question.lower().strip()
 
-    # Solar Panel & Dust / Soiling query (e.g., "is panel dusty?", "panel health", "clean panel", "thusi")
-    if any(k in text for k in ['dust', 'dirty', 'clean', 'panel', 'soiling', 'wash', 'wipe', 'thusi', 'kannaadi', 'shadow', 'indoor']):
-        # If panel is indoors or heavily shaded
-        if 'Indoors' in panel_dust.get('status', ''):
-            if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
-                return (
-                    f"🏢 *சோலார் பேனல் நிலை:* அறைக்குள் / அதிக நிழலில் உள்ளது!\n"
-                    f"நேரடி சூரிய ஒளி இல்லாததால் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
-                    f"💡 *ஆலோசனை:* பேட்டரியை வேகமாக சார்ஜ் செய்ய பேனலை வெளியில் வெயிலில் வைக்கவும்!"
-                )
-            return (
-                f"🏢 *Solar Panel Placement Telemetry:*\n"
-                f"• Detected State: `{panel_dust['status']}`\n"
-                f"• Light Deficit: `-{panel_dust['loss_pct']}%` loss compared to outdoor sunlight.\n"
-                f"💡 *Recommendation:* The panel is receiving indoor/ambient lighting. Move it outdoors under direct sun to charge your battery!"
-            )
-
-        # Tamil response rotation
-        if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'soodu', 'mazhai']):
-            tamil_options = [
-                (
-                    f"🧹 *சோலார் பேனல் தூய்மை நிலை:*\n"
-                    f"பேனல் கண்ணாடியில் தூசி படிந்துள்ளது (தூய்மை: `{panel_dust['cleanliness_pct']}%`).\n"
-                    f"இதனால் சோலார் மின் உற்பத்தி `-{panel_dust['loss_pct']}%` குறைந்துள்ளது.\n"
-                    f"💡 *ஆலோசனை:* கண்ணாடியை மெல்லிய ஈரத்துணியால் துடைத்தால் சார்ஜிங் உடனடியாக அதிகரிக்கும்!"
-                ),
-                (
-                    f"☀️ *சோலார் பேனல் ஆய்வு:*\n"
-                    f"• கண்ணாடி தூய்மை: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
-                    f"• தூசி இழப்பு: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W இழப்பு)\n"
-                    f"💡 *ஆலோசனை:* நாளை மழை பெய்தால் தானாகவே தூய்மையாகும், இல்லையெனில் துடைக்கவும்!"
-                )
-            ]
-            return tamil_options[advice_counter % len(tamil_options)]
-
-        rain_note = "Tomorrow's rain will naturally wash your panel clean!" if weather.get('is_tmrw_rainy') else "Wipe the panel glass with a soft damp microfiber cloth today to recover full 3W solar generation!"
-        english_options = [
-            (
-                f"🧹 *Solar Panel Cleanliness Diagnosis:*\n"
-                f"• Cleanliness Score: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
-                f"• Optical Loss: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W lost under sunshine)\n"
-                f"💡 *Recommendation:* {rain_note}"
-            ),
-            (
-                f"☀️ *Solar Optical Soiling Check:*\n"
-                f"• Glass Transmission: `{panel_dust['cleanliness_pct']}%` | State: `{panel_dust['status']}`\n"
-                f"• Power Penalty: `-{panel_dust['loss_pct']}%` generation drop\n"
-                f"💡 *Maintenance Tip:* {rain_note}"
-            ),
-            (
-                f"🔍 *Live Panel Health Telemetry:*\n"
-                f"Solar harvest is currently throttled by `-{panel_dust['loss_pct']}%` due to surface soiling.\n"
-                f"• Current Health: `{panel_dust['cleanliness_pct']}% Clean`\n"
-                f"💡 *Advice:* {rain_note}"
-            )
-        ]
-        return english_options[advice_counter % len(english_options)]
-
-    # General Tamil / Tanglish intent
-    if any(k in text for k in ['nalaiki', 'epdi', 'iruku', 'mazhai', 'sollu', 'vanakam', 'kaatru']):
+    # A. Capability & Help Queries ("what else you can do", "what other thing you can do", "help")
+    if any(k in text for k in ['what else', 'what other', 'what can you', 'help', 'features', 'commands', 'capability', 'epdi use']):
         return (
-            f"🔋 *பேட்டரி நிலை:* `{v_bat:.2f}V` (ஆரோக்கியம்: `{soh:.0f}%`, வெப்பம்: `{temp_c:.1f}°C`)\n"
-            f"⏳ *பேக்கப்:* `{hrs}h {mins}m` இன்றிரவு.\n"
-            f"🌧️ *நாளை சேலம் வானிலை:* `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% மழை வாய்ப்பு).\n"
-            f"💡 *ஆலோசனை:* நாளை சோலார் சார்ஜிங் குறைவாக இருக்கும், எனவே இன்றிரவு பேட்டரியை சிக்கனமாக பயன்படுத்தவும்!"
+            f"🤖 *I am your 2-Way Solar & Battery AI Doctor! Here is what you can ask me:*\n\n"
+            f"• ⚡ *Appliances:* _\"Can I run a 10W fan for 8 hours?\"_\n"
+            f"• ☀️ *Solar Generation:* _\"How much today generated?\"_\n"
+            f"• 💰 *Electricity Savings:* _\"How much energy saved?\"_\n"
+            f"• 🧹 *Dust & Cleaning:* _\"Is my solar panel dirty?\"_\n"
+            f"• ⛅ *Weather Forecast:* _\"Will it rain tomorrow in Salem?\"_\n"
+            f"• 🔋 *Battery Health:* _\"How long will my battery last?\"_\n"
+            f"• 🗣️ *தமிழ் உரையாடல்:* _\"என்ன நடக்குது?\"_ அல்லது _\"நாளைக்கு மழை பெய்யுமா?\"_\n"
+            f"• 📄 *Full Status Report:* Send _\"/report\"_ anytime!"
         )
 
-    # Appliance / Load assessment query (e.g., "Can I run a 10W fan?")
+    # B. Appliance / Load Runtime Assessment ("Can I run a fan for 8 hours?", "10W fan", "TV")
     watt_match = re.search(r'(\d+)\s*(w|watt)', text)
-    if watt_match or any(k in text for k in ['fan', 'light', 'lamp', 'tv', 'load', 'run', 'power', 'device']):
-        asked_watts = float(watt_match.group(1)) if watt_match else 10.0
+    hours_match = re.search(r'(\d+)\s*(h|hr|hour)', text)
+    if watt_match or hours_match or any(k in text for k in ['fan', 'light', 'lamp', 'tv', 'load', 'run appliance', 'run a']):
+        asked_watts = float(watt_match.group(1)) if watt_match else (10.0 if 'fan' in text else (5.0 if 'light' in text else 15.0))
         usable_soc = max(0.05, min(1.0, (v_bat - 3.2) / (4.15 - 3.2)))
-        usable_wh = round(usable_soc * 8.5, 1)
-        run_h = usable_wh / max(0.1, asked_watts)
-        run_hours = int(run_h)
-        run_minutes = int((run_h - run_hours) * 60)
+        usable_wh = round(usable_soc * 8.5, 1) # Nominal 18650 cell ~8.5Wh
+        max_run_h = usable_wh / max(0.1, asked_watts)
+        max_h = int(max_run_h)
+        max_m = int((max_run_h - max_h) * 60)
 
-        if weather.get('is_tmrw_rainy') or weather.get('is_tmrw_cloudy'):
-            weather_adv = f"⚠️ *Warning:* Tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain). Solar recharging will be poor tomorrow, so we advise keeping loads under 2W tonight!"
+        if hours_match:
+            desired_hours = float(hours_match.group(1))
+            if max_run_h >= desired_hours:
+                verdict = f"✅ *Yes!* You can safely run a {asked_watts:.0f}W load for {desired_hours:.0f} hours tonight."
+            else:
+                verdict = f"⚠️ *No:* A {asked_watts:.0f}W load cannot run for {desired_hours:.0f} hours tonight. At your current voltage ({v_bat:.2f}V, ~{usable_wh} Wh usable), it will run for approx `{max_h}h {max_m}m`."
         else:
-            weather_adv = f"☀️ Tomorrow's forecast is clear ({weather['tmrw_desc']}), so solar panels will easily replenish your battery tomorrow."
+            verdict = f"⚡ *Appliance Assessment ({asked_watts:.0f}W):*\nAt current battery level ({v_bat:.2f}V, ~{usable_wh} Wh usable), a {asked_watts:.0f}W load will run for approx `{max_h}h {max_m}m`."
 
+        if weather.get('is_tmrw_rainy'):
+            w_tip = f"🌧️ *Notice:* Tomorrow in Salem is forecast to be {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain). Recharging will be low tomorrow, so conserve power tonight!"
+        else:
+            w_tip = f"☀️ Tomorrow will have plenty of sunshine to recharge your battery."
+
+        return f"{verdict}\n{w_tip}"
+
+    # C. Solar Generation Queries ("How much today generated", "generation", "harvest")
+    if any(k in text for k in ['generated', 'generation', 'harvest', 'harvested', 'power made', 'produce', 'how much solar']):
         return (
-            f"⚡ *Appliance Assessment ({asked_watts:.0f}W):*\n"
-            f"At your current voltage ({v_bat:.2f}V, ~{usable_wh} Wh usable), a {asked_watts:.0f}W load will run for approx `{run_hours}h {run_minutes}m`.\n"
-            f"{weather_adv}"
+            f"☀️ *Solar Generation Report (Salem Station):*\n"
+            f"• ⚡ *Energy Harvested Today:* `{wh_tot:.1f} Wh` (~`{tneb_u:.3f} kWh units`)\n"
+            f"• 🔌 *Panel Output:* `{v_sol:.2f}V` (Cleanliness: `{panel_dust['cleanliness_pct']}%`)\n"
+            f"• 💰 *Replaced Grid Power:* Saved approx `₹{tneb_rs:.2f}` on your TNEB bill today!\n"
+            f"💡 *Status:* " + ("Panel glass has dust accumulation. Clean to harvest +58% more power!" if panel_dust.get('is_dusty') else "Panel glass is clean and harvesting peak sunlight.")
         )
 
-    # Status / Greeting query
-    if any(k in text for k in ['status', 'report', 'health', 'how is', 'check', 'hi', 'hello', 'start', 'help']):
+    # D. Energy & Financial Savings Queries ("How much energy saved", "tneb", "bill", "money", "rupees")
+    if any(k in text for k in ['saved', 'saving', 'savings', 'tneb', 'bill', 'money', 'rupee', 'panam', 'kaasu']) or re.search(r'\brs\b', text):
+        return (
+            f"💰 *TNEB Energy & Financial Savings:*\n"
+            f"• ⚡ *Solar Units Generated:* `{tneb_u:.3f} Units (kWh)`\n"
+            f"• 💵 *Money Saved Today:* `₹{tneb_rs:.2f}` (calculated at domestic TNEB tariff)\n"
+            f"• 📈 *Projected Monthly Savings:* `₹{monthly:.2f} / month`\n"
+            f"💡 Your solar setup is actively replacing expensive grid electricity with clean battery storage!"
+        )
+
+    # E. Weather & Rain Queries (English & Tanglish/Tamil: "nakaliku raina", "naalaiku mazhaiya", "rain")
+    if any(k in text for k in ['rain', 'raina', 'mazhai', 'weather', 'forecast', 'climate', 'kaalanilai', 'naalaiku', 'nakaliku', 'tomorrow', 'tmrw', 'cloud']):
+        if weather.get('is_tmrw_rainy'):
+            return (
+                f"🌧️ *Salem Weather Alert for Tomorrow:*\n"
+                f"• Forecast: `{weather['tmrw_desc']}` ({weather['tmrw_temp']}°C)\n"
+                f"• Rain Probability: `{weather['tmrw_rain_prob']}%` ({weather['tmrw_rain_mm']} mm rain expected)\n"
+                f"• Cloud Cover: `{weather['tmrw_cloud']}%`\n"
+                f"⚠️ *Battery Advice:* Heavy clouds will reduce solar charging tomorrow! Please conserve battery power tonight and avoid high-drain loads."
+            )
+        else:
+            return (
+                f"☀️ *Salem Weather Forecast for Tomorrow:*\n"
+                f"• Forecast: `{weather['tmrw_desc']}` ({weather['tmrw_temp']}°C)\n"
+                f"• Sunshine: Clear skies with only `{weather['tmrw_cloud']}%` clouds.\n"
+                f"• Rain Chance: `{weather['tmrw_rain_prob']}%` (Minimal)\n"
+                f"✅ Full solar recharge expected tomorrow! Safe to utilize your normal battery backup tonight."
+            )
+
+    # F. Tamil Conversational Greetings ("Ena nadakuthu", "Enna aachu", "Epdi irukku")
+    if any(k in text for k in ['ena nadakuthu', 'enna nadakuthu', 'enna aachu', 'epdi iruk', 'sollu', 'vanakkam']):
+        return (
+            f"🔋 *வணக்கம்! தற்போதைய சோலார் & பேட்டரி நிலை:*\n"
+            f"• 🔋 *பேட்டரி:* `{v_bat:.2f}V` (ஆரோக்கியம்: `{soh:.0f}%`, வெப்பம்: `{temp_c:.1f}°C`)\n"
+            f"• ⏳ *பேக்கப்:* இன்றிரவு சுமார் `{hrs} மணி {mins} நிமிடம்` நீடிக்கும்.\n"
+            f"• ☀️ *சோலார்:* இன்று `{wh_tot:.1f} Wh` மின்சாரம் உற்பத்தி செய்யப்பட்டு ₹{tneb_rs:.2f} மிச்சப்படுத்தப்பட்டுள்ளது!\n"
+            f"• 🌧️ *வானிலை:* நாளை சேலத்தில் `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% மழை வாய்ப்பு).\n"
+            f"💡 ஏதேனும் சாதனம் (Fan, Light) இயக்கலாமா என்று சந்தேகமிருந்தால் தாராளமாக கேளுங்கள்!"
+        )
+
+    # G. Solar Panel Dust & Soiling Queries ("Is panel dirty", "dust", "clean", "thusi")
+    if any(k in text for k in ['dust', 'dirty', 'clean', 'panel', 'soiling', 'wash', 'wipe', 'thusi', 'kannaadi', 'shadow']):
+        rain_note = "நாளை மழை பெய்யும் என்பதால் தானாகவே தூய்மையாகும்!" if weather.get('is_tmrw_rainy') else "ஈரத்துணியால் துடைத்தால் சார்ஜிங் உடனடியாக அதிகரிக்கும்!"
+        if any(k in text for k in ['sollu', 'iruku', 'epdi', 'thusi', 'kannadi']):
+            return (
+                f"🧹 *சோலார் பேனல் தூய்மை நிலை:*\n"
+                f"• கண்ணாடி தூய்மை: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
+                f"• தூசி இழப்பு: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W இழப்பு)\n"
+                f"💡 *ஆலோசனை:* {rain_note}"
+            )
+        rain_adv = "Tomorrow's rain will naturally wash your panel clean, no manual wiping needed!" if weather.get('is_tmrw_rainy') else "Wipe the panel glass with a soft damp microfiber cloth today to recover full 3W solar generation!"
+        return (
+            f"🧹 *Solar Panel Cleanliness Diagnosis:*\n"
+            f"• Cleanliness Score: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
+            f"• Optical Power Loss: `-{panel_dust['loss_pct']}%` (~{panel_dust['loss_watts']}W lost under sunshine)\n"
+            f"💡 *Recommendation:* {rain_adv}"
+        )
+
+    # H. Battery Health & Remaining Runtime Queries ("How long will it last", "backup", "health", "soh")
+    if any(k in text for k in ['backup', 'runtime', 'last', 'duration', 'health', 'soh', 'battery life', 'how long']):
+        return (
+            f"🔋 *Battery Performance & Health Diagnostics:*\n"
+            f"• 🔋 *Terminal Voltage:* `{v_bat:.2f}V` (Cutoff: 3.00V)\n"
+            f"• 💓 *State of Health (SoH):* `{soh:.0f}% (Healthy)`\n"
+            f"• ⏳ *Remaining Usable Backup:* `{hrs} hours {mins} minutes` at current {cur_ma:.0f}mA load.\n"
+            f"• 🌡️ *Cell Temperature:* `{temp_c:.1f}°C ({thermal_status})`\n"
+            f"💡 The 18650 cell degradation is minimal and within safe electrochemical limits."
+        )
+
+    # I. Thermal Queries
+    if any(k in text for k in ['temp', 'heat', 'hot', 'thermal', 'soodu']):
+        return (
+            f"🌡️ *Thermal Diagnosis:* Battery cell temperature is `{temp_c:.1f}°C`.\n"
+            f"Optimal range for 18650 Li-ion is 20°C–35°C. " +
+            ("Cell is operating within safe thermal parameters." if temp_c < 38.0 else "Ensure adequate air ventilation around the battery holder!")
+        )
+
+    # J. Status / Greetings ("Hi", "Hello", "Status")
+    if any(k in text for k in ['hi', 'hello', 'hey', 'start', 'status', 'vanakkam']):
         return (
             f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
-            f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Temp: `{temp_c:.1f}°C ({thermal_status})`\n"
-            f"• ⚡ *Real Load:* `{cur_ma:.0f} mA` ({p_w:.2f} W) | Backup: `{hrs}h {mins}m`\n"
-            f"• ☀️ *Solar Panel:* `{wh_tot:.1f} Wh` | Cleanliness: `{panel_dust['cleanliness_pct']}%` ({panel_dust['status']})\n"
-            f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n"
-            f"💬 *You can ask me questions like:*\n"
+            f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Backup: `{hrs}h {mins}m`\n"
+            f"• ⚡ *Real State:* `{mode}` ({cur_ma:.0f} mA, {p_w:.2f} W)\n"
+            f"• ☀️ *Solar Panel:* `{wh_tot:.1f} Wh` | Cleanliness: `{panel_dust['cleanliness_pct']}%`\n"
+            f"• 💰 *TNEB Saved:* `₹{tneb_rs:.2f}` today\n"
+            f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n\n"
+            f"💬 *Ask me any question! Examples:*\n"
+            f"- _\"How much today generated?\"_\n"
+            f"- _\"Can I run a 10W fan for 8 hours?\"_\n"
             f"- _\"Is my solar panel dirty?\"_\n"
-            f"- _\"Can I run my 10W fan tonight?\"_\n"
             f"- _\"நாளைக்கு மழை பெய்யுமா?\"_"
         )
 
-    # Temperature / Thermal query
-    if any(k in text for k in ['temp', 'heat', 'hot', 'thermal']):
-        return (
-            f"🌡️ *Thermal Diagnosis:* Battery temperature is `{temp_c:.1f}°C`.\n"
-            f"Optimal range for 18650 Li-ion is 20°C–35°C. " +
-            ("Cell is operating within safe thermal parameters." if temp_c < 38.0 else "Ensure adequate ventilation around the battery holder!")
-        )
-
-    # General fallback
+    # K. Smart Catch-All Conversational Fallback
     return (
-        f"🔋 *Live Summary:* Battery is at `{v_bat:.2f}V` ({soh:.0f}% SoH) with `{hrs}h {mins}m` backup.\n"
-        f"Tomorrow's Salem forecast: `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% rain).\n"
-        f"💡 Ask me any question about your appliances, panel dust, charging, or energy saving!"
+        f"🤖 *SolarBot:* I noticed you asked: _\"{user_question}\"_\n\n"
+        f"Right now, your battery is at `{v_bat:.2f}V` ({soh:.0f}% SoH) with `{hrs}h {mins}m` backup tonight.\n\n"
+        f"💡 *You can ask me questions like:*\n"
+        f"• _\"Can I run a fan for 8 hours?\"_\n"
+        f"• _\"How much today generated?\"_\n"
+        f"• _\"How much energy saved?\"_\n"
+        f"• _\"Is my solar panel dirty?\"_\n"
+        f"• _\"Will it rain tomorrow?\"_\n"
+        f"• _\"என்ன நடக்குது?\"_"
     )
 
 # =====================================================================
@@ -674,8 +719,34 @@ def telegram_chatbot_worker():
 
                     print(f"\n[CHATBOT QUESTION from {user_name} ({chat_id})]: '{user_text}'")
 
-                    # Generate AI Copilot Response
-                    ai_reply = ask_ai_battery_doctor(user_text, latest_telemetry)
+                    # On-demand full report command
+                    if user_text.lower() in ['/report', 'report', '/status', 'status report']:
+                        timestamp_str = datetime.datetime.now().strftime("%I:%M %p")
+                        header = (
+                            f"🤖 *Solar Battery Health Monitor & Messenger*\n"
+                            f"📍 *Station:* {LOCATION_NAME}, TN • `{timestamp_str}`\n"
+                            f"────────────────────────────────"
+                        )
+                        body = generate_layman_report(
+                            v_bat=latest_telemetry['v_battery'],
+                            soh=latest_telemetry['pred_soh'],
+                            hours=latest_telemetry['backup_hours'],
+                            mins=latest_telemetry['backup_mins'],
+                            wh_today=latest_telemetry['wh_today'],
+                            tneb_units=latest_telemetry.get('tneb_units', 0.014),
+                            tneb_saved=latest_telemetry.get('tneb_saved', 0.11),
+                            monthly_saved=latest_telemetry.get('monthly_saved', 3.30),
+                            weather=latest_telemetry['weather'],
+                            current_ma=latest_telemetry['current_ma'],
+                            temp_bat=latest_telemetry['temp_bat'],
+                            panel_dust=latest_telemetry.get('panel_dust'),
+                            current_mode=latest_telemetry.get('current_mode', 'Discharging 🔋')
+                        )
+                        ai_reply = f"{header}\n{body}"
+                    else:
+                        # Generate AI Copilot 2-Way Conversational Response
+                        ai_reply = ask_ai_battery_doctor(user_text, latest_telemetry)
+
                     print(f"[CHATBOT AI REPLY]:\n{ai_reply}\n")
 
                     # Send answer back to Telegram user
