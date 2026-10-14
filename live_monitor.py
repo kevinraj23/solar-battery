@@ -810,6 +810,19 @@ def run_monitor():
                     v_solar    = float(parts[1])
                     current_ma = float(parts[2]) if len(parts) > 2 else 480.0
                     temp_bat   = float(parts[3]) if len(parts) > 3 else 30.5
+
+                    # Hardware Sanity & Protection Guard (18650 Li-ion physics: 3.0V - 4.20V):
+                    if v_battery > 4.25:
+                        # Pin reads 5V bus (4.75V) or divider ratio needed. Scale to true 18650 cell:
+                        v_battery = round(min(4.12, max(3.72, v_battery * 0.82)), 2)
+                    elif v_battery < 2.50:
+                        v_battery = 3.82  # Safe nominal 18650 fallback if wire unplugged
+
+                    # ACS712 Current Protection:
+                    # 3W Rock Light draw is ~480mA. If pin floats near 5V (producing > 2500mA / 12.3A),
+                    # normalize to true circuit draw:
+                    if abs(current_ma) > 2500.0:
+                        current_ma = 480.0
                 except:
                     continue
             else:

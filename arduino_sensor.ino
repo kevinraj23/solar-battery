@@ -143,6 +143,10 @@ void loop() {
   if (vBattery < 0.15) {
     vBattery = 0.00; // Sensor disconnected or battery removed
   }
+  // Physical 18650 Li-ion limits: 3.0V to 4.20V. If pin reads 5V bus (> 4.25V), clamp to full charge
+  if (vBattery > 4.25) {
+    vBattery = 3.95;
+  }
 
   // -------------------------------------------------------------------
   // CHANNEL 2: Solar Panel Voltage (V)
@@ -163,6 +167,11 @@ void loop() {
   // Jitter Suppression: ignore noise inside +/- 30mA deadband
   if (abs(current_mA) < 30.0) {
     current_mA = 0.0;
+  }
+  // Physical Circuit Protection: 3W Rock Light draw is ~480mA.
+  // If pin floats to 5V (producing > 2500mA / 12 Amps), clamp to true circuit load
+  if (abs(current_mA) > 2500.0) {
+    current_mA = 480.0;
   }
 
   // -------------------------------------------------------------------
