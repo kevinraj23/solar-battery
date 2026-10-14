@@ -164,14 +164,10 @@ void loop() {
   float currentAmps = (vCurSensor - acs_zero_voltage) / ACS_SENSITIVITY;
   float current_mA = currentAmps * 1000.0;
 
-  // Jitter Suppression: ignore noise inside +/- 30mA deadband
-  if (abs(current_mA) < 30.0) {
-    current_mA = 0.0;
-  }
-  // Physical Circuit Protection: 3W Rock Light draw is ~480mA.
-  // If pin floats to 5V (producing > 2500mA / 12 Amps), clamp to true circuit load
-  if (abs(current_mA) > 2500.0) {
-    current_mA = 480.0;
+  // Jitter Suppression & Idle Disconnection:
+  // If current is below 45mA or pin floats near 5V (> 2500mA), it indicates load is disconnected:
+  if (abs(current_mA) > 2500.0 || abs(current_mA) < 45.0) {
+    current_mA = 0.0; // Clean Idle (0 mA)
   }
 
   // -------------------------------------------------------------------

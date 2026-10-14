@@ -543,10 +543,29 @@ INSTRUCTIONS:
             f"• 📄 *Full Status Report:* Send _\"/report\"_ anytime!"
         )
 
-    # B. Appliance / Load Runtime Assessment ("Can I run a fan for 8 hours?", "10W fan", "TV")
+    # B. Live Load Connection Queries ("is load connected", "does any load connected", "load running", "consumes")
+    if any(k in text for k in ['load connected', 'any load', 'load running', 'load is connected', 'motor running', 'is load', 'load now', 'load consume', 'load is on']):
+        if abs(cur_ma) < 45.0:
+            return (
+                f"🔌 *Load Status:* **No load is connected right now!**\n\n"
+                f"• ⚡ *Real Load:* `0 mA` (`0.00 W`)\n"
+                f"• 🔋 *State:* `Idle 💤 (Standby / Disconnected)`\n"
+                f"• 🔋 *Battery:* `{v_bat:.2f}V` (Ready with `{hrs}h {mins}m` backup tonight).\n"
+                f"💡 Your 18650 cell is safely resting without any power drain."
+            )
+        else:
+            return (
+                f"⚡ *Load Status:* **Yes, a live load is connected!**\n\n"
+                f"• ⚡ *Current Draw:* `{abs(cur_ma):.0f} mA` (`{p_w:.2f} W`)\n"
+                f"• 🔋 *State:* `{mode}`\n"
+                f"• ⏳ *Remaining Runtime:* Approx `{hrs}h {mins}m` under this active load.\n"
+                f"• 🌡️ *Cell Temp:* `{temp_c:.1f}°C ({thermal_status})`."
+            )
+
+    # C. Appliance / Load Runtime Assessment ("Can I run a fan for 8 hours?", "10W fan", "TV")
     watt_match = re.search(r'(\d+)\s*(w|watt)', text)
     hours_match = re.search(r'(\d+)\s*(h|hr|hour)', text)
-    if watt_match or hours_match or any(k in text for k in ['fan', 'light', 'lamp', 'tv', 'load', 'run appliance', 'run a']):
+    if watt_match or hours_match or any(k in text for k in ['fan', 'light', 'lamp', 'tv', 'run appliance', 'run a', 'appliance']):
         asked_watts = float(watt_match.group(1)) if watt_match else (10.0 if 'fan' in text else (5.0 if 'light' in text else 15.0))
         usable_soc = max(0.05, min(1.0, (v_bat - 3.2) / (4.15 - 3.2)))
         usable_wh = round(usable_soc * 8.5, 1) # Nominal 18650 cell ~8.5Wh
@@ -771,14 +790,31 @@ def telegram_chatbot_worker():
 # 🔄 MAIN EXECUTION LOOP
 # =====================================================================
 def run_monitor():
-    print(f"\n[INIT] Connecting to Arduino Nano on port '{COM_PORT}'...")
+    print(f"\n[INIT] Searching for Arduino Nano USB connection...")
+    ser = None
+    target_port = COM_PORT
+
     try:
-        ser = serial.Serial(COM_PORT, BAUD_RATE, timeout=2)
+        import serial.tools.list_ports
+        available_ports = list(serial.tools.list_ports.comports())
+        # First check if specified COM_PORT is available
+        if any(p.device.upper() == COM_PORT.upper() for p in available_ports):
+            target_port = COM_PORT
+        elif available_ports:
+            # Auto-detect USB-Serial adapter
+            target_port = available_ports[0].device
+            print(f"[AUTO-DETECT] Arduino Nano detected on '{target_port}' ({available_ports[0].description})")
+    except Exception:
+        pass
+
+    try:
+        ser = serial.Serial(target_port, BAUD_RATE, timeout=2)
         time.sleep(2)
-        print(f"[OK] CONNECTED TO ARDUINO NANO ON {COM_PORT}!\n")
+        print(f"[OK] CONNECTED TO REAL ARDUINO NANO ON {target_port}!\n")
     except Exception as e:
-        print(f"[INFO] Could not open {COM_PORT} ({e}).")
-        print(f"Notice: Running in SIMULATION MODE for {LOCATION_NAME} (18650 & 3W Rock Light).\n")
+        print(f"[HARDWARE ALERT] Could not open {target_port} ({e}).")
+        print(f"Notice: Running in SIMULATION DEMO MODE for {LOCATION_NAME}.")
+        print(f"💡 Plug your Arduino Nano USB cable into PC to stream live motor and battery sensors!\n")
         ser = None
 
     start_time = time.time()
@@ -790,7 +826,7 @@ def run_monitor():
 
     print("="*70)
     print(f"SOLAR BATTERY MONITOR & AUTOMATED MESSENGER ({LOCATION_NAME}, TN)")
-    print(f"Predictive Weather: {'SIMULATED RAIN/CLOUDS' if SIMULATE_RAINY_TOMORROW else 'LIVE SATELLITE'}")
+    print(f"Mode: {'REAL ARDUINO SENSORS' if ser else 'DEMO SIMULATION'}")
     print("="*70 + "\n")
 
     # Start 2-Way Interactive AI Chatbot Copilot Thread
@@ -808,7 +844,7 @@ def run_monitor():
                     parts = line.split(',')
                     v_battery  = float(parts[0])
                     v_solar    = float(parts[1])
-                    current_ma = float(parts[2]) if len(parts) > 2 else 480.0
+                    current_ma = float(parts[2]) if len(parts) > 2 else 0.0
                     temp_bat   = float(parts[3]) if len(parts) > 3 else 30.5
 
                     # Hardware Sanity & Protection Guard (18650 Li-ion physics: 3.0V - 4.20V):
@@ -819,10 +855,10 @@ def run_monitor():
                         v_battery = 3.82  # Safe nominal 18650 fallback if wire unplugged
 
                     # ACS712 Current Protection:
-                    # 3W Rock Light draw is ~480mA. If pin floats near 5V (producing > 2500mA / 12.3A),
-                    # normalize to true circuit draw:
-                    if abs(current_ma) > 2500.0:
-                        current_ma = 480.0
+                    # If pin floats near 5V (producing > 2500mA / 12.3A), it indicates floating pin / open circuit.
+                    # Default cleanly to 0.0 mA (Idle):
+                    if abs(current_ma) > 2500.0 or abs(current_ma) < 45.0:
+                        current_ma = 0.0
                 except:
                     continue
             else:
@@ -832,7 +868,7 @@ def run_monitor():
                 if v_battery < 3.20:
                     v_battery = 3.88  # Reset cycle
                 v_solar    = 5.82
-                current_ma = 480.0  # 3W Rock Light draw ~ 480mA
+                current_ma = 0.0  # Clean idle by default when no physical load is running
                 temp_bat   = round(30.5 + (sim_step * 0.02), 1)
 
             now = time.time()
