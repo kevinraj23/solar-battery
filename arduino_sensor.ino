@@ -14,9 +14,14 @@ const int PIN_LED     = 13;  // Built-in status LED heartbeat
 
 // Hardware Calibration Constants
 const float V_REF = 5.00;              // Microcontroller operating voltage
-const float SOLAR_DIVIDER_RATIO = 2.0; // Two equal 10k resistors divide voltage by 2
-const float ACS_OFFSET_V = 2.50;       // ACS712 0A resting midpoint (VCC / 2)
+const float SOLAR_DIVIDER_RATIO = 2.0; // Two equal 10k resistors divide solar voltage by 2
+
+// Battery Divider: Set to 1.0 if A0 is connected directly (via 10k protection resistor).
+// Set to 2.0 if using two 10k:10k divider resistors (e.g. if Serial Monitor showed ~2.1V).
+const float BATTERY_DIVIDER_RATIO = 1.0; 
+
 const float ACS_SENSITIVITY = 0.185;   // ACS712-05A: 185 mV/A (0.185 V/A)
+float acs_zero_offset = 2.50;          // Auto-calibrated in setup()
 
 void setup() {
   pinMode(PIN_LED, OUTPUT);
@@ -24,6 +29,14 @@ void setup() {
   
   // Power-on stabilization delay
   delay(1000);
+
+  // Auto-calibrate ACS712 zero-current offset at boot
+  float sumZero = 0.0;
+  for (int i = 0; i < 40; i++) {
+    sumZero += analogRead(PIN_CURRENT);
+    delay(10);
+  }
+  acs_zero_offset = ((sumZero / 40.0) * V_REF) / 1023.0;
 }
 
 void loop() {
@@ -53,18 +66,20 @@ void loop() {
   float avgTmp = sumTmp / NUM_SAMPLES;
 
   // 1. Calculate 18650 Battery Voltage (V)
-  float vBattery = (avgBat * V_REF) / 1023.0;
+  float vBattery = ((avgBat * V_REF) / 1023.0) * BATTERY_DIVIDER_RATIO;
 
   // 2. Calculate Solar Panel Voltage (V)
   float vSolar = ((avgSol * V_REF) / 1023.0) * SOLAR_DIVIDER_RATIO;
 
-  // 3. Calculate Real Load Current (mA) using ACS712
+  // 3. Calculate Real Load Current (mA) with DIRECTION preserved (signed)
+  // Positive (+) = Discharging (Powering Load)
+  // Negative (-) = Charging (Solar recharging battery)
   float vCurSensor = (avgCur * V_REF) / 1023.0;
-  float currentAmps = (vCurSensor - ACS_OFFSET_V) / ACS_SENSITIVITY;
-  float current_mA = abs(currentAmps * 1000.0);
+  float currentAmps = (vCurSensor - acs_zero_offset) / ACS_SENSITIVITY;
+  float current_mA = currentAmps * 1000.0;
   
-  // Noise deadband: suppress minor sensor jitter below 40mA when load is disconnected
-  if (current_mA < 40.0) {
+  // Noise deadband: suppress minor sensor jitter within +/- 35mA
+  if (abs(current_mA) < 35.0) {
     current_mA = 0.0;
   }
 

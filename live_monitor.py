@@ -48,7 +48,7 @@ TELEGRAM_CHAT_IDS = [
 ]
 
 # 3. Google Gemini API Key (Optional: free from https://aistudio.google.com)
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
+GEMINI_API_KEY = "AQ.Ab8RN6L_jXNjYdE1JwEMcASyaACsLXmPXV-DrVtuwjSaUY5SXg"
 
 # 4. Hardware Settings
 COM_PORT  = "COM3"    # Set your Arduino COM Port (e.g., 'COM3', 'COM4')
@@ -323,9 +323,9 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5, panel_dust=None):
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5, panel_dust=None, current_mode="Discharging 🔋"):
     """Formats the clean, beautiful report for Salem including telemetry, panel dust status, thermal health, and tomorrow's forecast."""
-    real_power_w = round((v_bat * current_ma) / 1000.0, 2)
+    real_power_w = round((v_bat * abs(current_ma)) / 1000.0, 2)
     thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
     panel_status_str = f"{panel_dust['cleanliness_pct']}% ({panel_dust['status']})" if panel_dust else "Clean ✨"
     
@@ -366,7 +366,7 @@ Generate EXACTLY these 7 bullet points with clear formatting and NO conversation
 
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Healthy) • `{hours}h {mins}m backup tonight`\n"
-        f"• ⚡ *Real Load:* `{current_ma:.0f} mA` ({real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
+        f"• ⚡ *Real Load:* `{current_mode}` (`{abs(current_ma):.0f} mA`, {real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
         f"• ☀️ *Solar Panel:* `{wh_today:.1f} Wh` • Cleanliness: `{panel_status_str}`\n"
         f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
@@ -415,7 +415,12 @@ def send_telegram_alerts(report_body):
             if res.status_code == 200:
                 print(f"[TELEGRAM] Alert sent to Chat ID {chat_id}!")
             else:
-                print(f"[TELEGRAM ERROR] ID {chat_id}: HTTP {res.status_code}")
+                err_detail = ""
+                try:
+                    err_detail = res.json().get('description', res.text)
+                except Exception:
+                    err_detail = res.text
+                print(f"[TELEGRAM ERROR] ID {chat_id}: HTTP {res.status_code} - {err_detail}")
         except Exception as err:
             print(f"[TELEGRAM FAILED] ID {chat_id}: {err}")
 
@@ -680,9 +685,13 @@ def telegram_chatbot_worker():
                         "text": ai_reply,
                         "parse_mode": "Markdown"
                     }
-                    requests.post(send_url, json=payload, timeout=6)
+                    reply_res = requests.post(send_url, json=payload, timeout=6)
+                    if reply_res.status_code == 200:
+                        print(f"[CHATBOT] Reply delivered to {user_name} ({chat_id})!")
+                    else:
+                        print(f"[CHATBOT ERROR] Failed to send reply to {chat_id}: HTTP {reply_res.status_code} - {reply_res.text}")
 
-        except Exception:
+        except Exception as e:
             time.sleep(2)
 
         time.sleep(1)
@@ -703,6 +712,8 @@ def run_monitor():
 
     start_time = time.time()
     previous_v = None
+    previous_time = None
+    smoothed_sag_rate = 1.0
     last_report_timestamp = 0
     sim_step = 0
 
@@ -740,40 +751,75 @@ def run_monitor():
                 current_ma = 480.0  # 3W Rock Light draw ~ 480mA
                 temp_bat   = round(30.5 + (sim_step * 0.02), 1)
 
-            elapsed_minutes = (time.time() - start_time) / 60.0
-            if previous_v is None:
-                sag_rate_mv = 1.0
+            now = time.time()
+            if previous_time is None or previous_v is None:
+                dt_min = 2.0 / 60.0
+                instant_sag = 1.0
             else:
-                sag_rate_mv = max(0.1, abs(previous_v - v_battery) * 1000.0)
+                dt_min = max(0.001, (now - previous_time) / 60.0)
+                # Discharging sag rate in mV/min under load
+                instant_sag = max(0.1, ((previous_v - v_battery) * 1000.0) / dt_min)
+
+            smoothed_sag_rate = 0.85 * smoothed_sag_rate + 0.15 * instant_sag
             previous_v = v_battery
+            previous_time = now
 
             # 1. Machine Learning Prediction
-            features = np.array([[v_battery, elapsed_minutes, sag_rate_mv]])
-            pred_runtime_minutes = runtime_model.predict(features)[0]
-            pred_soh             = soh_model.predict(features)[0]
+            # Map current voltage to nominal discharge cycle progress (matching battery_data.csv)
+            # In 18650 NMC: 4.15V is 0 min, 3.85V is ~130 min, 3.0V is ~330 min
+            nominal_cycle_progress = max(0.0, min(330.0, (4.15 - v_battery) / (4.15 - 3.0) * 330.0))
+            features = np.array([[v_battery, nominal_cycle_progress, smoothed_sag_rate]])
+            pred_runtime_minutes = max(0.0, float(runtime_model.predict(features)[0]))
+            pred_soh             = min(100.0, max(20.0, float(soh_model.predict(features)[0])))
 
             backup_hours = int(pred_runtime_minutes // 60)
             backup_mins  = int(pred_runtime_minutes % 60)
 
-            # 2. Solar & TNEB Savings
-            wh_generated = round(v_solar * 0.48 * 5.0, 1)
+            # 2. Current Direction & Power Flow
+            # Positive (+) = Discharging (Powering Load)
+            # Negative (-) = Charging (Solar replenishing battery)
+            abs_current_ma = abs(current_ma)
+            if current_ma > 35.0:
+                current_mode = "Discharging 🔋"
+                real_power_w = round((v_battery * abs_current_ma) / 1000.0, 2)
+            elif current_ma < -35.0:
+                current_mode = "Charging ⚡"
+                real_power_w = round((v_battery * abs_current_ma) / 1000.0, 2)
+            else:
+                current_mode = "Idle 💤"
+                real_power_w = 0.0
+
+            # 3. Solar & TNEB Savings (only when solar panel is connected and generating)
+            solar_connected = v_solar >= 0.5
+            wh_generated = round(v_solar * 0.48 * 5.0, 1) if solar_connected else 0.0
             tneb_units   = round(wh_generated / 1000.0, 3)
             tneb_saved   = round(tneb_units * 8.0, 2)
             monthly_save = round(tneb_saved * 30, 2)
 
-            # 3. Weather for Salem (Live Today + Tomorrow Forecast)
+            # 4. Weather for Salem (Live Today + Tomorrow Forecast)
             weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
 
-            # 4. Solar Panel Optical Dust & Soiling Detection
-            panel_dust = evaluate_panel_soiling(v_solar, weather_info['today_irradiance'], simulate_dust=SIMULATE_DUSTY_PANEL)
+            # 5. Solar Panel Optical Dust & Soiling Detection
+            if solar_connected:
+                panel_dust = evaluate_panel_soiling(v_solar, weather_info['today_irradiance'], simulate_dust=SIMULATE_DUSTY_PANEL)
+            else:
+                panel_dust = {
+                    'cleanliness_pct': 100,
+                    'is_dusty': False,
+                    'status': 'No Solar / Disconnected 🔌',
+                    'loss_pct': 0,
+                    'loss_watts': 0.0,
+                    'irradiance': weather_info.get('today_irradiance', 0.0)
+                }
 
             # Update shared state for interactive chatbot copilot
             latest_telemetry.update({
                 'v_battery': v_battery,
                 'v_solar': v_solar,
-                'current_ma': current_ma,
+                'current_ma': abs_current_ma,
+                'current_mode': current_mode,
                 'temp_bat': temp_bat,
-                'real_power_w': round((v_battery * current_ma) / 1000.0, 2),
+                'real_power_w': real_power_w,
                 'pred_soh': pred_soh,
                 'backup_hours': backup_hours,
                 'backup_mins': backup_mins,
@@ -786,7 +832,7 @@ def run_monitor():
             })
 
             # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V (Dust: {panel_dust['cleanliness_pct']}%) | Load: {current_ma:.0f}mA | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V ({panel_dust['status']}) | {current_mode} ({abs_current_ma:.0f}mA, {real_power_w:.2f}W) | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
 
             # 5. Generate & Send Predictive Report
             current_time = time.time()
@@ -803,9 +849,10 @@ def run_monitor():
                     tneb_saved=tneb_saved,
                     monthly_saved=monthly_save,
                     weather=weather_info,
-                    current_ma=current_ma,
+                    current_ma=abs_current_ma,
                     temp_bat=temp_bat,
-                    panel_dust=panel_dust
+                    panel_dust=panel_dust,
+                    current_mode=current_mode
                 )
 
                 print("\n" + "="*65)
