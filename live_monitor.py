@@ -43,8 +43,9 @@ TELEGRAM_BOT_TOKEN = "8747746289:AAFUw90HmGsjKl_plzJ22VzSqG8KhTygViA"
 # 2. Telegram Chat IDs: Add YOUR ID and your FRIEND'S ID here!
 # Both phones will receive the alert at the same time:
 TELEGRAM_CHAT_IDS = [
-    "YOUR_TELEGRAM_CHAT_ID_HERE",
-     "6189432323"  
+    "8046938314",
+     "6189432323",
+     "7625882054"  
 ]
 
 # 3. Google Gemini API Key (Optional: free from https://aistudio.google.com)
