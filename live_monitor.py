@@ -22,6 +22,7 @@ import serial
 import serial.tools.list_ports
 import threading
 import re
+import sqlite3
 
 # Suppress sklearn feature name warnings
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -367,10 +368,11 @@ Generate EXACTLY these 7 bullet points with clear formatting and NO conversation
     smart_tip = get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=temp_bat, current_ma=current_ma, panel_dust=panel_dust)
 
     report = (
-        f"• 🔋 *Battery Health:* `{soh:.0f}%` (Healthy) • `{hours}h {mins}m backup tonight`\n"
+        f"• 🔋 *Battery Health:* `{soh:.0f}%` (Hybrid Coulomb/ML SoC) • `{hours}h {mins}m backup tonight`\n"
         f"• ⚡ *Real Load:* `{current_mode}` (`{abs(current_ma):.0f} mA`, {real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
         f"• ☀️ *Solar Panel:* `{wh_today:.1f} Wh` • Cleanliness: `{panel_status_str}`\n"
         f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
+        f"• 🏢 *Commercial Scale (100W Rooftop):* ~`480 Wh/day` • Saves `₹115/mo` • Up to `19h fan backup`\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
         f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
         f"• 💡 *Smart Advice:* {smart_tip}"
@@ -488,6 +490,21 @@ def ask_ai_battery_doctor(user_question, telemetry):
     mode    = telemetry.get('current_mode', 'Discharging 🔋')
     panel_dust = telemetry.get('panel_dust', {'cleanliness_pct': 42, 'is_dusty': True, 'status': 'Dust Detected 🧹', 'loss_pct': 58, 'loss_watts': 1.4})
     thermal_status = "Safe" if temp_c < 38.0 else ("Warm" if temp_c < 45.0 else "Overheating")
+    text = user_question.lower().strip()
+
+    # Commercial Rooftop Scaling Equivalency ("/scale", "commercial", "scale", "rooftop")
+    if any(k in text for k in ['/scale', 'scale', 'commercial', 'rooftop', 'industrial', 'home scale']):
+        return (
+            f"🏢 *Commercial Rooftop Solar & Battery Scaling Analysis:*\n\n"
+            f"• 🔬 *Current Demo Prototype:* 3W Mini Solar Panel + 1S 18650 Li-ion Cell (~8.5 Wh capacity)\n"
+            f"• ⚡ *Real Load Right Now:* `{abs(cur_ma):.0f} mA` (`{p_w:.2f} W`) | Backup: `{hrs}h {mins}m`\n\n"
+            f"🏢 *Scaled 100W Rooftop Residential Equivalent:*\n"
+            f"• ☀️ *Solar Array:* 100W Monocrystalline Panel (~480 Wh/day generation in Salem sun)\n"
+            f"• 🔋 *Battery Bank:* 12V 100Ah (1200 Wh LiFePO4 or Lead-Acid Bank, ~140x capacity)\n"
+            f"• 💡 *Load Capacity:* Can power a 50W BLDC ceiling fan for ~19 hours or 3x 10W LED bulbs for 32 hours continuously!\n"
+            f"• 💰 *TNEB Financial Savings:* ~14.4 kWh units/month = approx `₹115 - ₹130 / month` grid displacement!\n"
+            f"• 🔄 *Algorithms Maintained:* Same Coulomb Counting + Random Forest ML health architecture scales seamlessly to multi-cell BMS packages."
+        )
 
     # 1. Try Gemini AI REST API for open-ended contextual reasoning
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
@@ -495,7 +512,7 @@ def ask_ai_battery_doctor(user_question, telemetry):
 You are "SolarBot", the friendly and intelligent 2-way conversational AI Copilot & Battery Doctor for an 18650 Solar Battery System in Salem, Tamil Nadu.
 
 LIVE TELEMETRY:
-• Battery: {v_bat:.2f}V | Health: {soh:.0f}% (Healthy) | Cell Temp: {temp_c:.1f}°C ({thermal_status})
+• Battery: {v_bat:.2f}V | Health/SoC: {soh:.0f}% (Hybrid Coulomb/ML SoC) | Cell Temp: {temp_c:.1f}°C ({thermal_status})
 • State: {mode} | Real Load: {cur_ma:.0f} mA ({p_w:.2f} W) | Usable Backup: {hrs}h {mins}m tonight
 • Solar Generation Today: {wh_tot:.1f} Wh | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']})
 • Electricity Savings: {tneb_u:.3f} Units saved today (₹{tneb_rs:.2f} today, ₹{monthly:.2f}/mo)
@@ -528,13 +545,12 @@ INSTRUCTIONS:
                 continue
 
     # 2. Robust Built-in 2-Way Conversational Engine (Zero-Latency Offline Fallback)
-    text = user_question.lower().strip()
-
     # A. Capability & Help Queries ("what else you can do", "what other thing you can do", "help")
     if any(k in text for k in ['what else', 'what other', 'what can you', 'help', 'features', 'commands', 'capability', 'epdi use']):
         return (
             f"🤖 *I am your 2-Way Solar & Battery AI Doctor! Here is what you can ask me:*\n\n"
             f"• ⚡ *Appliances:* _\"Can I run a 10W fan for 8 hours?\"_\n"
+            f"• 🏢 *Commercial Scaling:* _\"/scale\"_ (100W rooftop system equivalent)\n"
             f"• ☀️ *Solar Generation:* _\"How much today generated?\"_\n"
             f"• 💰 *Electricity Savings:* _\"How much energy saved?\"_\n"
             f"• 🧹 *Dust & Cleaning:* _\"Is my solar panel dirty?\"_\n"
@@ -740,7 +756,9 @@ def telegram_chatbot_worker():
                     print(f"\n[CHATBOT QUESTION from {user_name} ({chat_id})]: '{user_text}'")
 
                     # On-demand full report command
-                    if user_text.lower() in ['/report', 'report', '/status', 'status report']:
+                    if user_text.lower() in ['/scale', 'scale', '/commercial', 'commercial']:
+                        ai_reply = ask_ai_battery_doctor('/scale', latest_telemetry)
+                    elif user_text.lower() in ['/report', 'report', '/status', 'status report']:
                         timestamp_str = datetime.datetime.now().strftime("%I:%M %p")
                         header = (
                             f"🤖 *Solar Battery Health Monitor & Messenger*\n"
@@ -798,19 +816,41 @@ def run_monitor():
     try:
         import serial.tools.list_ports
         available_ports = list(serial.tools.list_ports.comports())
-        # First check if specified COM_PORT is available
-        if any(p.device.upper() == COM_PORT.upper() for p in available_ports):
-            target_port = COM_PORT
-        elif available_ports:
-            # Auto-detect USB-Serial adapter
-            target_port = available_ports[0].device
-            print(f"[AUTO-DETECT] Arduino Nano detected on '{target_port}' ({available_ports[0].description})")
-    except Exception:
-        pass
+        print(f"[PORT SCAN] Found {len(available_ports)} serial port(s):")
+        for p in available_ports:
+            print(f"  • {p.device}: {p.description}")
+
+        matched_port = None
+        # 1. Match configured COM_PORT if present
+        for p in available_ports:
+            if p.device.upper() == COM_PORT.upper():
+                matched_port = p.device
+                break
+
+        # 2. Check for CH340, Arduino, or USB-Serial clone adapters
+        if not matched_port:
+            for p in available_ports:
+                desc = (p.description or "").upper()
+                if any(k in desc for k in ["CH340", "USB-SERIAL", "ARDUINO", "USB SERIAL", "CP210", "FTDI"]):
+                    matched_port = p.device
+                    print(f"[AUTO-DETECT] Identified Arduino interface on '{matched_port}' ({p.description})")
+                    break
+
+        # 3. Fallback to first available port
+        if not matched_port and available_ports:
+            matched_port = available_ports[0].device
+
+        if matched_port:
+            target_port = matched_port
+    except Exception as scan_err:
+        print(f"[PORT SCAN WARNING] {scan_err}")
 
     try:
         ser = serial.Serial(target_port, BAUD_RATE, timeout=2)
-        time.sleep(2)
+        # Arduino Nano CH340 resets via DTR when serial port opens.
+        # Sleep 3.2s to allow bootloader + setup() + ACS712 calibration to finish, then clear buffer:
+        time.sleep(3.2)
+        ser.reset_input_buffer()
         print(f"[OK] CONNECTED TO REAL ARDUINO NANO ON {target_port}!\n")
     except Exception as e:
         print(f"[HARDWARE ALERT] Could not open {target_port} ({e}).")
@@ -825,10 +865,39 @@ def run_monitor():
     last_report_timestamp = 0
     sim_step = 0
 
+    # Coulomb Counting State (Current Integration)
+    RATED_CAPACITY_MAH = 2200.0  # Standard 18650 rated nominal capacity
+    accumulated_discharge_mah = 0.0
+    last_coulomb_time = time.time()
+
     print("="*70)
     print(f"SOLAR BATTERY MONITOR & AUTOMATED MESSENGER ({LOCATION_NAME}, TN)")
     print(f"Mode: {'REAL ARDUINO SENSORS' if ser else 'DEMO SIMULATION'}")
     print("="*70 + "\n")
+
+    # Initialize Local Time-Series Database for Live Dashboard (Streamlit / Grafana)
+    DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telemetry.db")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS telemetry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                time_sec REAL,
+                v_battery REAL,
+                v_solar REAL,
+                i_load_ma REAL,
+                temp_c REAL,
+                esr_mohm REAL,
+                soh_percent REAL,
+                runtime_hours REAL
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[DB NOTICE] Telemetry DB init: {e}")
 
     # Start 2-Way Interactive AI Chatbot Copilot Thread
     chatbot_thread = threading.Thread(target=telegram_chatbot_worker, daemon=True)
@@ -840,7 +909,11 @@ def run_monitor():
             if ser:
                 try:
                     line = ser.readline().decode('utf-8', errors='ignore').strip()
-                    if not line or ',' not in line:
+                    if not line:
+                        continue
+                    # Print raw hardware stream for evaluation & debugging
+                    print(f"[RAW HARDWARE STREAM]: {line}")
+                    if ',' not in line:
                         continue
                     parts = line.split(',')
                     v_battery  = float(parts[0])
@@ -910,17 +983,33 @@ def run_monitor():
                 current_mode = "Idle 💤"
                 real_power_w = 0.0
 
-            # 3. Solar & TNEB Savings (only when solar panel is connected and generating)
+            # 3. Stateful Coulomb Counting Integration (ΔmAh = I * Δt)
+            coulomb_dt_hours = max(0.0001, (now - last_coulomb_time) / 3600.0)
+            last_coulomb_time = now
+            if current_mode == "Discharging 🔋":
+                accumulated_discharge_mah += abs_current_ma * coulomb_dt_hours
+            elif current_mode == "Charging ⚡":
+                # Coulomb efficiency ~95%
+                accumulated_discharge_mah -= abs_current_ma * coulomb_dt_hours * 0.95
+
+            accumulated_discharge_mah = max(0.0, min(RATED_CAPACITY_MAH, accumulated_discharge_mah))
+            coulomb_soc = max(5.0, min(100.0, ((RATED_CAPACITY_MAH - accumulated_discharge_mah) / RATED_CAPACITY_MAH) * 100.0))
+
+            # Sensor Fusion: Hybrid SoC/SoH combining Coulomb Counting (70%) and Voltage-sag ML (30%)
+            # Provides stable State of Charge without sudden jump on load disconnect
+            hybrid_soh = round(0.70 * coulomb_soc + 0.30 * pred_soh, 1)
+
+            # 4. Solar & TNEB Savings (only when solar panel is connected and generating)
             solar_connected = v_solar >= 0.5
             wh_generated = round(v_solar * 0.48 * 5.0, 1) if solar_connected else 0.0
             tneb_units   = round(wh_generated / 1000.0, 3)
             tneb_saved   = round(tneb_units * 8.0, 2)
             monthly_save = round(tneb_saved * 30, 2)
 
-            # 4. Weather for Salem (Live Today + Tomorrow Forecast)
+            # 5. Weather for Salem (Live Today + Tomorrow Forecast)
             weather_info = get_live_weather(LATITUDE, LONGITUDE, simulate_rainy=SIMULATE_RAINY_TOMORROW)
 
-            # 5. Solar Panel Optical Dust & Soiling Detection
+            # 6. Solar Panel Optical Dust & Soiling Detection
             if solar_connected:
                 panel_dust = evaluate_panel_soiling(v_solar, weather_info['today_irradiance'], simulate_dust=SIMULATE_DUSTY_PANEL)
             else:
@@ -941,7 +1030,7 @@ def run_monitor():
                 'current_mode': current_mode,
                 'temp_bat': temp_bat,
                 'real_power_w': real_power_w,
-                'pred_soh': pred_soh,
+                'pred_soh': hybrid_soh,
                 'backup_hours': backup_hours,
                 'backup_mins': backup_mins,
                 'wh_today': wh_generated,
@@ -952,17 +1041,33 @@ def run_monitor():
                 'panel_dust': panel_dust
             })
 
-            # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V ({panel_dust['status']}) | {current_mode} ({abs_current_ma:.0f}mA, {real_power_w:.2f}W) | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
+            # 6b. Log to Time-Series SQLite Database for Live Web Dashboard (Streamlit / Grafana)
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                elapsed_sec = round(now - start_time, 1)
+                time_str = datetime.datetime.now().strftime("%H:%M:%S")
+                est_esr = round((0.190 / max(0.05, abs_current_ma / 1000.0)) * 1000.0, 1) if abs_current_ma > 50 else 46.0
+                c.execute("""
+                    INSERT INTO telemetry (timestamp, time_sec, v_battery, v_solar, i_load_ma, temp_c, esr_mohm, soh_percent, runtime_hours)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (time_str, elapsed_sec, v_battery, v_solar, abs_current_ma, temp_bat, est_esr, hybrid_soh, round(pred_runtime_minutes/60.0, 2)))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
-            # 5. Generate & Send Predictive Report
+            # Stream to local terminal
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V ({panel_dust['status']}) | {current_mode} ({abs_current_ma:.0f}mA, {real_power_w:.2f}W) | SoH: {hybrid_soh:.0f}% (Hybrid) | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
+
+            # 7. Generate & Send Predictive Report
             current_time = time.time()
             if (current_time - last_report_timestamp) >= REPORT_INTERVAL_SECONDS:
                 last_report_timestamp = current_time
 
                 report_body = generate_layman_report(
                     v_bat=v_battery,
-                    soh=pred_soh,
+                    soh=hybrid_soh,
                     hours=backup_hours,
                     mins=backup_mins,
                     wh_today=wh_generated,
