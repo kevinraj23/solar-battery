@@ -21,26 +21,28 @@ pip install -r requirements.txt
 
 ---
 
-##  Configuration (Open `live_monitor.py`)
+## ⚙️ Configuration (Secure `.env` Setup)
 
-Open `live_monitor.py` and set your credentials at the top (lines 28–39):
+To keep API keys secure and prevent GitHub secret exposure alerts, copy the `.env.example` template to `.env`:
 
-```python
-# 1. Telegram Bot Credentials
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"  # Get from @BotFather on Telegram
-TELEGRAM_CHAT_ID   = "YOUR_CHAT_ID"    # Get from @userinfobot on Telegram
-
-# 2. Google Gemini API Key
-GEMINI_API_KEY     = "YOUR_GEMINI_KEY" # Free from https://aistudio.google.com
-
-# 3. Hardware COM Port & Location
-COM_PORT           = "COM3"            # Port of Arduino Nano (e.g. COM3, COM4)
-LATITUDE           = 11.6643           # Salem Latitude
-LONGITUDE          = 78.1460           # Salem Longitude
-
-# 4. Tomorrow Weather & Demo Simulation
-SIMULATE_RAINY_TOMORROW = True         # Set True to test 'Rainy & Cloudy - Use Wisely' alert!
+```bash
+cp .env.example .env
 ```
+
+Open `.env` and set your credentials:
+
+```ini
+# 1. Telegram Bot Credentials (from @BotFather)
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+
+# 2. Telegram Alert Chat IDs (comma-separated, from @userinfobot)
+TELEGRAM_CHAT_IDS=YOUR_CHAT_ID_1,YOUR_CHAT_ID_2
+
+# 3. Google Gemini AI API Key (Optional: free from https://aistudio.google.com)
+GEMINI_API_KEY=YOUR_GEMINI_KEY_HERE
+```
+
+*(Optional settings such as `COM_PORT`, `SIMULATE_RAINY_TOMORROW`, and `SIMULATE_DUSTY_PANEL` can still be adjusted directly in `live_monitor.py` or `.env`)*
 
 ---
 

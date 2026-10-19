@@ -42,13 +42,15 @@ If it prints `✅ All libraries installed successfully!`, you are good to go!
 
 ---
 
-## 🔑 Configure Your Google Gemini API Key
+## 🔑 Configure Your API Keys (.env)
 
 1. Get a free API key from [Google AI Studio](https://aistudio.google.com).
-2. Open [`live_monitor.py`](live_monitor.py) and paste your key on line 51:
+2. Get your Telegram Bot Token from `@BotFather`.
+3. Copy `.env.example` to `.env` and set your credentials:
 
-```python
-GEMINI_API_KEY = "AIzaSy..."  # Replace with your actual Gemini API key
+```ini
+TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
+GEMINI_API_KEY="AIzaSy..."
 ```
 
 ---

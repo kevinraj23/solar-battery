@@ -10,5 +10,8 @@ pyserial>=3.5
 # Weather & Telegram APIs
 requests>=2.28.0
 
+# Environment Configuration
+python-dotenv>=1.0.0
+
 # Google Gemini AI API
 google-generativeai>=0.8.0

@@ -2,10 +2,19 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.env
 .venv/
 env/
 venv/
+
+# Environment secrets & credentials
+.env
+.env.*
+*.env
+!.env.example
+
+# Databases & runtime data
+*.db
+telemetry.db
 
 # Antigravity & IDE
 .vscode/

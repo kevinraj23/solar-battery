@@ -11,6 +11,7 @@ Master Live Gateway with:
 6. Automated Multi-User Telegram Alerts (Supports sending to both you & your friend!)
 """
 
+import os
 import sys
 import time
 import datetime
@@ -24,6 +25,32 @@ import threading
 import re
 import sqlite3
 
+# Try to load environment variables from python-dotenv if installed
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Built-in zero-dependency fallback for loading local .env file
+def _load_env_fallback():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env_fallback()
+
 # Suppress sklearn feature name warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -35,26 +62,28 @@ if sys.stdout.encoding != 'utf-8':
         pass
 
 # =====================================================================
-# ⚙️ CONFIGURATION SETTINGS (EDIT THESE)
+# ⚙️ CONFIGURATION SETTINGS (SECURELY LOADED FROM .ENV / ENVIRONMENT)
 # =====================================================================
 
 # 1. Telegram Bot Token (from @BotFather)
-TELEGRAM_BOT_TOKEN = "8747746289:AAFUw90HmGsjKl_plzJ22VzSqG8KhTygViA"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
 
 # 2. Telegram Chat IDs: Add YOUR ID and your FRIEND'S ID here!
-# Both phones will receive the alert at the same time:
-TELEGRAM_CHAT_IDS = [
-    "8046938314",
-     "6189432323",
-     "7625882054"  
-]
+# Both phones will receive the alert at the same time (comma-separated in .env):
+_env_chats = os.getenv("TELEGRAM_CHAT_IDS", "")
+if _env_chats:
+    TELEGRAM_CHAT_IDS = [cid.strip() for cid in _env_chats.split(",") if cid.strip()]
+else:
+    TELEGRAM_CHAT_IDS = [
+        "YOUR_TELEGRAM_CHAT_ID_HERE"
+    ]
 
 # 3. Google Gemini API Key (Optional: free from https://aistudio.google.com)
-GEMINI_API_KEY = "AQ.Ab8RN6L_jXNjYdE1JwEMcASyaACsLXmPXV-DrVtuwjSaUY5SXg"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # 4. Hardware Settings
-COM_PORT  = "COM3"    # Set your Arduino COM Port (e.g., 'COM3', 'COM4')
-BAUD_RATE = 9600
+COM_PORT  = os.getenv("COM_PORT", "COM3")    # Set your Arduino COM Port (e.g., 'COM3', 'COM4')
+BAUD_RATE = int(os.getenv("BAUD_RATE", "9600"))
 
 # 5. Location Coordinates: SALEM, TAMIL NADU
 LOCATION_NAME = "Salem"
