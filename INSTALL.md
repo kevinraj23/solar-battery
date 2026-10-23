@@ -15,7 +15,7 @@ pip install -r requirements.txt
 Or install all dependencies explicitly in a single command:
 
 ```bash
-pip install google-generativeai pyserial requests scikit-learn pandas numpy joblib
+pip install google-generativeai pyserial requests scikit-learn pandas numpy joblib python-dotenv streamlit matplotlib
 ```
 
 ---
@@ -35,7 +35,7 @@ pip install google-generativeai
 Run this one-liner to verify that all modules are properly recognized by Python:
 
 ```bash
-python -c "import google.generativeai, serial, sklearn, requests; print('✅ All libraries installed successfully!')"
+python -c "import google.generativeai, serial, sklearn, requests, streamlit, matplotlib; print('✅ All libraries installed successfully!')"
 ```
 
 If it prints `✅ All libraries installed successfully!`, you are good to go!

@@ -72,8 +72,16 @@ python live_monitor.py
 ```
 
 > 💡 **No Hardware? No Problem!**  
-> If an Arduino is not plugged in, the system automatically enters **Simulation Mode**, emulating your exact 18650 cell ($3.84\text{V}$), 3W Rock Light solar panel ($5.85\text{V}$), 480mA load current, and 30.5°C cell temperature!
+> If an Arduino is not plugged in, the system automatically enters **Simulation Mode**, emulating your exact 18650 cell ($3.84\text{V}$), 3W Rock Light solar panel ($5.85\text{V}$), 480mA load current, and 30.5°C cell temperature! Telemetry is logged to `telemetry.db` in real time.
 
+### Step 4: Launch the Real-Time Web Dashboard (Streamlit)
+In a new terminal window, run:
+```bash
+streamlit run dashboard.py
+```
+This opens the live web interface at `http://localhost:8501`, rendering real-time oscilloscope waveforms, transient motor load voltage sag ($\Delta V$), solar yield vs soiling loss curve, and health diagnostics.
+
+![Solar Battery Health Monitor Live Dashboard](dashboard_ui_mockup.png)
 ---
 
 ## 📬 Sample Predictive Report (Telegram & Console)
