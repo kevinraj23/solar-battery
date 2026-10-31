@@ -371,17 +371,17 @@ You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Me
 Telemetry:
 - Battery Voltage: {v_bat:.2f}V | Current Draw: {current_ma:.0f}mA ({real_power_w:.2f}W) | Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 - Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
-- Solar Generation: {solar_w:.1f} W (Rated 1W to 5W Solar Panel) | Panel Cleanliness: {panel_status_str}
+- Solar Generation: {solar_w:.1f} W (Rated 1W to 5W Solar Panel)
 - Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
 - Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
 Generate EXACTLY these 6 bullet points with clear formatting and NO conversational opening. Do NOT mention TNEB, electricity bills, tariffs, or rupees:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
 • ⚡ *Real Load:* {current_mode} ({abs(current_ma):.0f} mA, {real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
-• ☀️ *Solar Generation:* {solar_w:.1f} W (1W – 5W Panel) • Cleanliness: {panel_status_str}
+• ☀️ *Solar Generation:* {solar_w:.1f} W (1W – 5W Panel)
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
 • 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
-• 💡 *Smart Advice:* [Write 1 fresh, practical tip. If panel is dusty, alert user to clean it or mention if tomorrow's rain will clean it! If tomorrow is rainy/cloudy, advise using power wisely tonight]
+• 💡 *Smart Advice:* [Write 1 fresh, practical tip about battery backup usage or tomorrow's weather forecast]
 """
             r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=4)
             if r.status_code == 200:
@@ -399,7 +399,7 @@ Generate EXACTLY these 6 bullet points with clear formatting and NO conversation
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Hybrid Coulomb/ML SoC) • `{hours}h {mins}m backup tonight`\n"
         f"• ⚡ *Real Load:* `{current_mode}` (`{abs(current_ma):.0f} mA`, {real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
-        f"• ☀️ *Solar Generation:* `{solar_w:.1f} W` (1W – 5W Panel) • Cleanliness: `{panel_status_str}`\n"
+        f"• ☀️ *Solar Generation:* `{solar_w:.1f} W` (1W – 5W Panel)\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
         f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
         f"• 💡 *Smart Advice:* {smart_tip}"
@@ -638,7 +638,7 @@ INSTRUCTIONS:
         return (
             f"☀️ *Solar Generation Report (Salem Station):*\n"
             f"• ⚡ *Energy Harvested Today:* `{wh_tot:.1f} Wh` (~`{tneb_u:.3f} kWh units`)\n"
-            f"• 🔌 *Panel Output:* `{v_sol:.2f}V` (Cleanliness: `{panel_dust['cleanliness_pct']}%`)\n"
+            f"• 🔌 *Panel Output:* `{v_sol:.2f}V` ({sol_w:.1f} W)\n"
             f"• ⚡ *Real-Time Solar Power:* `{sol_w:.1f} W` (Operating in 1W to 5W solar PV rating)\n"
             f"💡 *Status:* " + ("Panel glass has dust accumulation. Clean to harvest +58% more power!" if panel_dust.get('is_dusty') else "Panel glass is clean and harvesting peak sunlight.")
         )
@@ -726,7 +726,7 @@ INSTRUCTIONS:
             f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
             f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Backup: `{hrs}h {mins}m`\n"
             f"• ⚡ *Real State:* `{mode}` ({cur_ma:.0f} mA, {p_w:.2f} W)\n"
-            f"• ☀️ *Solar Generation:* `{sol_w:.1f} W` (1W – 5W Panel) | Cleanliness: `{panel_dust['cleanliness_pct']}%`\n"
+            f"• ☀️ *Solar Generation:* `{sol_w:.1f} W` (1W – 5W Panel)\n"
             f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n\n"
             f"💬 *Ask me any question! Examples:*\n"
             f"- _\"How much today generated?\"_\n"
