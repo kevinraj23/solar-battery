@@ -167,7 +167,8 @@ def render_dashboard():
         """, unsafe_allow_html=True)
 
     with h_col2:
-        system_badge = "● SYSTEM LIVE (COM3)" if is_hardware_live else "● SYSTEM LIVE (COM3)"
+        com_disp = os.getenv("COM_PORT", "COM4")
+        system_badge = f"● HARDWARE LIVE ({com_disp})" if is_hardware_live else f"● SYSTEM READY ({com_disp})"
         st.markdown(f"""
         <div style="display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 4px;">
             <div style="background: #DCFCE7; border: 1px solid #86EFAC; color: #166534; font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 20px; white-space: nowrap;">

@@ -54,12 +54,11 @@ _load_env_fallback()
 # Suppress sklearn feature name warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
-# Ensure Windows terminal doesn't crash on emojis or special characters
-if sys.stdout.encoding != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except:
-        pass
+# Ensure Windows terminal doesn't crash on emojis and flushes immediately
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
+except:
+    pass
 
 # =====================================================================
 # ⚙️ CONFIGURATION SETTINGS (SECURELY LOADED FROM .ENV / ENVIRONMENT)
@@ -82,7 +81,7 @@ else:
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # 4. Hardware Settings
-COM_PORT  = os.getenv("COM_PORT", "COM3")    # Set your Arduino COM Port (e.g., 'COM3', 'COM4')
+COM_PORT  = os.getenv("COM_PORT", "COM11")    # Set your Arduino COM Port (e.g., 'COM3', 'COM4')
 BAUD_RATE = int(os.getenv("BAUD_RATE", "9600"))
 
 # 5. Location Coordinates: SALEM, TAMIL NADU
@@ -108,7 +107,8 @@ SIMULATE_DUSTY_PANEL = True
 # =====================================================================
 print("\n[INIT] Loading Machine Learning model from 'battery_model.pkl'...")
 try:
-    ml_package = joblib.load("battery_model.pkl")
+    model_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "battery_model.pkl")
+    ml_package = joblib.load(model_p if os.path.exists(model_p) else "battery_model.pkl")
     runtime_model = ml_package['runtime_model']
     soh_model     = ml_package['soh_model']
     print("[OK] ML Model loaded successfully! (Random Forest 18650 Predictor)")
@@ -363,7 +363,7 @@ def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_s
     # 1. Try Gemini AI via REST API if key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GEMINI_API_KEY}"
             prompt = f"""
 You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Messenger' stationed in Salem, Tamil Nadu.
 Telemetry:
@@ -559,7 +559,7 @@ INSTRUCTIONS:
 3. If the user asks in Tanglish or Tamil, reply warmly in friendly Tanglish / Tamil. If in English, reply in English.
 4. If they ask about running appliances (e.g., fan, light, TV), calculate whether the current {hrs}h {mins}m backup can support it and advise accordingly.
 """
-        models_to_try = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+        models_to_try = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite"]
         for m in models_to_try:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={GEMINI_API_KEY}"
@@ -850,19 +850,23 @@ def run_monitor():
             print(f"  • {p.device}: {p.description}")
 
         matched_port = None
-        # 1. Match configured COM_PORT if present
-        for p in available_ports:
-            if p.device.upper() == COM_PORT.upper():
-                matched_port = p.device
-                break
+        # 1. First check if configured COM_PORT (e.g. COM11) is available
+        if COM_PORT:
+            for p in available_ports:
+                if p.device.upper() == COM_PORT.upper():
+                    matched_port = p.device
+                    print(f"[PORT SELECT] Found requested port '{matched_port}' ({p.description})")
+                    break
 
-        # 2. Check for CH340, Arduino, or USB-Serial clone adapters
+        # 2. If requested COM_PORT not found, auto-detect Arduino / CH340 / USB-Serial
         if not matched_port:
             for p in available_ports:
-                desc = (p.description or "").upper()
-                if any(k in desc for k in ["CH340", "USB-SERIAL", "ARDUINO", "USB SERIAL", "CP210", "FTDI"]):
+                desc = ((p.description or "") + " " + getattr(p, 'hwid', '')).upper()
+                if any(k in desc for k in ["CH340", "USB-SERIAL", "ARDUINO", "USB SERIAL", "CP210", "FTDI", "1A86", "2341"]):
                     matched_port = p.device
-                    print(f"[AUTO-DETECT] Identified Arduino interface on '{matched_port}' ({p.description})")
+                    print(f"[AUTO-DETECT] Identified Arduino hardware on '{matched_port}' ({p.description})")
+                    if COM_PORT and COM_PORT.upper() != matched_port.upper():
+                        print(f"[NOTICE] Configured '{COM_PORT}' not found, automatically using detected '{matched_port}'!")
                     break
 
         # 3. Fallback to first available port
@@ -882,9 +886,13 @@ def run_monitor():
         ser.reset_input_buffer()
         print(f"[OK] CONNECTED TO REAL ARDUINO NANO ON {target_port}!\n")
     except Exception as e:
-        print(f"[HARDWARE ALERT] Could not open {target_port} ({e}).")
-        print(f"Notice: Running in SIMULATION DEMO MODE for {LOCATION_NAME}.")
-        print(f"💡 Plug your Arduino Nano USB cable into PC to stream live motor and battery sensors!\n")
+        err_msg = str(e)
+        print(f"[HARDWARE ALERT] Could not open {target_port} ({err_msg}).")
+        if "PermissionError" in err_msg or "Access is denied" in err_msg:
+            print("⚠️  NOTICE: Port is in use! If the Arduino IDE Serial Monitor or Plotter is open, please CLOSE IT.\n")
+        else:
+            print(f"Notice: Running in SIMULATION DEMO MODE for {LOCATION_NAME}.")
+            print(f"💡 Plug your Arduino Nano USB cable into PC to stream live motor and battery sensors!\n")
         ser = None
 
     start_time = time.time()
@@ -945,10 +953,27 @@ def run_monitor():
                     if ',' not in line:
                         continue
                     parts = line.split(',')
-                    v_battery  = float(parts[0])
-                    v_solar    = float(parts[1])
-                    current_ma = float(parts[2]) if len(parts) > 2 else 0.0
-                    temp_bat   = float(parts[3]) if len(parts) > 3 else 30.5
+                    # 1. Skip header line if sent by Arduino setup()
+                    if any(c.isalpha() for c in parts[0]):
+                        print(f"[ARDUINO HEADER]: {line}")
+                        continue
+
+                    val0 = float(parts[0])
+                    val1 = float(parts[1]) if len(parts) > 1 else 0.0
+                    val2 = float(parts[2]) if len(parts) > 2 else 0.0
+                    val3 = float(parts[3]) if len(parts) > 3 else 0.0
+
+                    v_battery = val0
+                    # 2. Universal Auto-Mapping for 4-Channel CSV:
+                    # Hardware Wiring Format: [battery_voltage, current_amp, temp_c, solar_voltage]
+                    if len(parts) >= 4 and (10.0 <= val2 <= 75.0 or abs(val1) < 15.0):
+                        current_ma = val1 * 1000.0 if abs(val1) < 15.0 else val1
+                        temp_bat   = val2
+                        v_solar    = val3
+                    else:
+                        v_solar    = val1
+                        current_ma = val2 if abs(val2) >= 15.0 else val2 * 1000.0
+                        temp_bat   = val3 if val3 > 0 else 30.5
 
                     # Hardware Sanity & Protection Guard (18650 Li-ion physics: 3.0V - 4.20V):
                     if v_battery > 4.25:
@@ -958,11 +983,19 @@ def run_monitor():
                         v_battery = 3.82  # Safe nominal 18650 fallback if wire unplugged
 
                     # ACS712 Current Protection:
-                    # If pin floats near 5V (producing > 2500mA / 12.3A), it indicates floating pin / open circuit.
-                    # Default cleanly to 0.0 mA (Idle):
-                    if abs(current_ma) > 2500.0 or abs(current_ma) < 45.0:
+                    # Sensitive load detection (down to 15 mA)
+                    if abs(current_ma) > 2500.0 or abs(current_ma) < 15.0:
                         current_ma = 0.0
-                except:
+                except (serial.SerialException, OSError) as ser_err:
+                    print(f"\n[HARDWARE WARNING] Serial connection lost on {target_port}: {ser_err}")
+                    print("Notice: Falling back to SIMULATION DEMO MODE gracefully.\n")
+                    try:
+                        ser.close()
+                    except:
+                        pass
+                    ser = None
+                    continue
+                except Exception:
                     continue
             else:
                 time.sleep(3)
