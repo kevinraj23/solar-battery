@@ -149,9 +149,20 @@ def render_dashboard():
     v_bat = float(latest.get('v_battery', 3.82))
     i_load = float(latest.get('i_load_ma', 410.0))
     v_sol = float(latest.get('v_solar', 5.85))
-    sol_w = round(min(5.0, max(0.5, (v_sol / 6.0) * 3.8)), 1) if v_sol > 0.5 else 0.0
     soh = float(latest.get('soh_percent', 94.0))
     temp_c = float(latest.get('temp_c', 29.8))
+
+    # Dynamic ML Remaining Backup Calculation
+    runtime_val = float(latest.get('runtime_hours', 0.0))
+    if runtime_val <= 0.08 or v_bat <= 3.08:
+        backup_str = "< 15m"
+        cutoff_sub = "Low Cell Warning (Discharge)"
+    else:
+        tot_mins = int(round(runtime_val * 60))
+        pred_h = tot_mins // 60
+        pred_m = tot_mins % 60
+        backup_str = f"{pred_h}h {pred_m:02d}m" if pred_h > 0 else f"{pred_m}m"
+        cutoff_sub = "To 3.0V Cutoff" 
 
     # --- 1. HEADER SECTION ---
     h_col1, h_col2 = st.columns([2.8, 1.2])
@@ -206,8 +217,8 @@ def render_dashboard():
         st.markdown(f"""
         <div class="card-container">
             <div class="card-title">SOLAR GENERATION (1W - 5W)</div>
-            <div class="card-value">{sol_w:.1f} W</div>
-            <div class="card-delta-green">{v_sol:.2f} V • Rated 1W to 5W</div>
+            <div class="card-value">{v_sol:.2f} V</div>
+            <div class="card-delta-green">Rated: 1W – 5W Panel</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -221,11 +232,11 @@ def render_dashboard():
         """, unsafe_allow_html=True)
 
     with c5:
-        st.markdown("""
+        st.markdown(f"""
         <div class="card-container">
             <div class="card-title">ML BACKUP PREDICTED</div>
-            <div class="card-value">5h 45m</div>
-            <div class="card-delta-gray">To 3.0V Cutoff</div>
+            <div class="card-value">{backup_str}</div>
+            <div class="card-delta-gray">{cutoff_sub}</div>
         </div>
         """, unsafe_allow_html=True)
 

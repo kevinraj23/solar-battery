@@ -354,7 +354,9 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units=0, tneb_saved=0, monthly_saved=0, weather=None, current_ma=480.0, temp_bat=30.5, panel_dust=None, current_mode="Discharging 🔋", solar_w=None, **kwargs):
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units=0, tneb_saved=0, monthly_saved=0, weather=None, current_ma=480.0, temp_bat=30.5, panel_dust=None, current_mode="Discharging 🔋", solar_w=None, v_solar=None, **kwargs):
+    if v_solar is None:
+        v_solar = kwargs.get("v_solar", 2.93)
     """Formats the clean, beautiful report for Salem: Solar Generation (1W to 5W), Battery Health, Thermal State, and Weather."""
     real_power_w = round((v_bat * abs(current_ma)) / 1000.0, 2)
     thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
@@ -371,14 +373,14 @@ You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Me
 Telemetry:
 - Battery Voltage: {v_bat:.2f}V | Current Draw: {current_ma:.0f}mA ({real_power_w:.2f}W) | Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 - Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
-- Solar Generation: {solar_w:.1f} W (Rated 1W to 5W Solar Panel)
+- Solar Generation: {v_solar:.2f} V (Rated 1W to 5W Solar Panel)
 - Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
 - Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
 Generate EXACTLY these 6 bullet points with clear formatting and NO conversational opening. Do NOT mention TNEB, electricity bills, tariffs, or rupees:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
 • ⚡ *Real Load:* {current_mode} ({abs(current_ma):.0f} mA, {real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
-• ☀️ *Solar Generation:* {solar_w:.1f} W (1W – 5W Panel)
+• ☀️ *Solar Generation:* {v_solar:.2f} V (1W – 5W Panel)
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
 • 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
 • 💡 *Smart Advice:* [Write 1 fresh, practical tip about battery backup usage or tomorrow's weather forecast]
@@ -399,7 +401,7 @@ Generate EXACTLY these 6 bullet points with clear formatting and NO conversation
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Hybrid Coulomb/ML SoC) • `{hours}h {mins}m backup tonight`\n"
         f"• ⚡ *Real Load:* `{current_mode}` (`{abs(current_ma):.0f} mA`, {real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
-        f"• ☀️ *Solar Generation:* `{solar_w:.1f} W` (1W – 5W Panel)\n"
+        f"• ☀️ *Solar Generation:* `{v_solar:.2f} V` (1W – 5W Panel)\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
         f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
         f"• 💡 *Smart Advice:* {smart_tip}"
@@ -726,7 +728,7 @@ INSTRUCTIONS:
             f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
             f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Backup: `{hrs}h {mins}m`\n"
             f"• ⚡ *Real State:* `{mode}` ({cur_ma:.0f} mA, {p_w:.2f} W)\n"
-            f"• ☀️ *Solar Generation:* `{sol_w:.1f} W` (1W – 5W Panel)\n"
+            f"• ☀️ *Solar Generation:* `{v_sol:.2f} V` (1W – 5W Panel)\n"
             f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n\n"
             f"💬 *Ask me any question! Examples:*\n"
             f"- _\"How much today generated?\"_\n"
@@ -793,6 +795,7 @@ def telegram_chatbot_worker():
                         )
                         sol_w = latest_telemetry.get('solar_w', round(min(5.0, max(0.5, (latest_telemetry['v_solar'] / 6.0) * 3.8)), 1))
                         body = generate_layman_report(
+                            v_solar=latest_telemetry.get('v_solar', 2.93),
                             solar_w=sol_w,
                             v_bat=latest_telemetry['v_battery'],
                             soh=latest_telemetry['pred_soh'],
@@ -1129,6 +1132,7 @@ def run_monitor():
                 last_report_timestamp = current_time
 
                 report_body = generate_layman_report(
+                    v_solar=v_solar,
                     solar_w=solar_watts,
                     v_bat=v_battery,
                     soh=hybrid_soh,
