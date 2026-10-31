@@ -354,11 +354,13 @@ def get_dynamic_advice(v_bat, soh, hours, mins, weather, temp_bat=30.5, current_
 # =====================================================================
 # 🤖 GEMINI AI ENHANCED REPORT GENERATOR
 # =====================================================================
-def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units, tneb_saved, monthly_saved, weather, current_ma=480.0, temp_bat=30.5, panel_dust=None, current_mode="Discharging 🔋"):
-    """Formats the clean, beautiful report for Salem including telemetry, panel dust status, thermal health, and tomorrow's forecast."""
+def generate_layman_report(v_bat, soh, hours, mins, wh_today, tneb_units=0, tneb_saved=0, monthly_saved=0, weather=None, current_ma=480.0, temp_bat=30.5, panel_dust=None, current_mode="Discharging 🔋", solar_w=None, **kwargs):
+    """Formats the clean, beautiful report for Salem: Solar Generation (1W to 5W), Battery Health, Thermal State, and Weather."""
     real_power_w = round((v_bat * abs(current_ma)) / 1000.0, 2)
     thermal_status = "Safe" if temp_bat < 38.0 else ("Warm" if temp_bat < 45.0 else "Overheating")
     panel_status_str = f"{panel_dust['cleanliness_pct']}% ({panel_dust['status']})" if panel_dust else "Clean ✨"
+    if solar_w is None:
+        solar_w = round(min(5.0, max(0.5, (wh_today / 2.5) if wh_today > 0 else 2.5)), 1)
     
     # 1. Try Gemini AI via REST API if key is provided
     if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
@@ -369,16 +371,14 @@ You are the AI Specialist for the 'Solar Battery Health Monitor and Automated Me
 Telemetry:
 - Battery Voltage: {v_bat:.2f}V | Current Draw: {current_ma:.0f}mA ({real_power_w:.2f}W) | Cell Temp: {temp_bat:.1f}°C ({thermal_status})
 - Health: {soh:.0f}% | Backup: {hours}h {mins}m tonight
-- Solar Panel: {wh_today:.1f} Wh harvested today | Panel Cleanliness: {panel_status_str}
-- TNEB Units: {tneb_units:.3f} | Saved: Rs {tneb_saved:.2f} (Rs {monthly_saved:.2f}/mo)
+- Solar Generation: {solar_w:.1f} W (Rated 1W to 5W Solar Panel) | Panel Cleanliness: {panel_status_str}
 - Salem Weather Today: {weather['today_desc']}, {weather['today_temp']}°C, Cloud Cover {weather['today_cloud']}%
 - Tomorrow Forecast: {weather['tmrw_desc']}, Max Temp: {weather['tmrw_temp']}°C, Rain Probability: {weather['tmrw_rain_prob']}%, Cloud Cover: {weather['tmrw_cloud']}%
 
-Generate EXACTLY these 7 bullet points with clear formatting and NO conversational opening:
+Generate EXACTLY these 6 bullet points with clear formatting and NO conversational opening. Do NOT mention TNEB, electricity bills, tariffs, or rupees:
 • 🔋 *Battery Health:* {soh:.0f}% (Healthy) • {hours}h {mins}m backup tonight
 • ⚡ *Real Load:* {current_mode} ({abs(current_ma):.0f} mA, {real_power_w:.2f} W) • Cell Temp: {temp_bat:.1f}°C ({thermal_status})
-• ☀️ *Solar Panel:* {wh_today:.1f} Wh generated • Cleanliness: {panel_status_str}
-• 💰 *TNEB Savings:* {tneb_units:.3f} Units • Saved ₹{tneb_saved:.2f} today (₹{monthly_saved:.2f}/mo)
+• ☀️ *Solar Generation:* {solar_w:.1f} W (1W – 5W Panel) • Cleanliness: {panel_status_str}
 • ⛅ *Salem Weather:* Today: {weather['today_desc']} ({weather['today_temp']}°C) • Cloud Cover {weather['today_cloud']}%
 • 🔮 *Tomorrow Forecast:* {weather['tmrw_desc']} • Rain Chance {weather['tmrw_rain_prob']}%
 • 💡 *Smart Advice:* [Write 1 fresh, practical tip. If panel is dusty, alert user to clean it or mention if tomorrow's rain will clean it! If tomorrow is rainy/cloudy, advise using power wisely tonight]
@@ -399,9 +399,7 @@ Generate EXACTLY these 7 bullet points with clear formatting and NO conversation
     report = (
         f"• 🔋 *Battery Health:* `{soh:.0f}%` (Hybrid Coulomb/ML SoC) • `{hours}h {mins}m backup tonight`\n"
         f"• ⚡ *Real Load:* `{current_mode}` (`{abs(current_ma):.0f} mA`, {real_power_w:.2f} W) • Cell Temp: `{temp_bat:.1f}°C ({thermal_status})`\n"
-        f"• ☀️ *Solar Panel:* `{wh_today:.1f} Wh` • Cleanliness: `{panel_status_str}`\n"
-        f"• 💰 *TNEB Savings:* `{tneb_units:.3f} Units` • Saved `₹{tneb_saved:.2f} today` (₹{monthly_saved:.2f}/mo)\n"
-        f"• 🏢 *Commercial Scale (100W Rooftop):* ~`480 Wh/day` • Saves `₹115/mo` • Up to `19h fan backup`\n"
+        f"• ☀️ *Solar Generation:* `{solar_w:.1f} W` (1W – 5W Panel) • Cleanliness: `{panel_status_str}`\n"
         f"• ⛅ *Salem Weather:* Today: `{weather['today_desc']} ({weather['today_temp']}°C)` • Cloud Cover `{weather['today_cloud']}%`\n"
         f"• 🔮 *Tomorrow Forecast:* `{weather['tmrw_desc']}` • Rain Chance `{weather['tmrw_rain_prob']}%`\n"
         f"• 💡 *Smart Advice:* {smart_tip}"
@@ -505,6 +503,7 @@ def ask_ai_battery_doctor(user_question, telemetry):
     """
     v_bat   = telemetry['v_battery']
     v_sol   = telemetry['v_solar']
+    sol_w   = telemetry.get('solar_w', round(min(5.0, max(0.5, (v_sol / 6.0) * 3.8)), 1))
     cur_ma  = telemetry['current_ma']
     temp_c  = telemetry['temp_bat']
     p_w     = telemetry['real_power_w']
@@ -531,7 +530,7 @@ def ask_ai_battery_doctor(user_question, telemetry):
             f"• ☀️ *Solar Array:* 100W Monocrystalline Panel (~480 Wh/day generation in Salem sun)\n"
             f"• 🔋 *Battery Bank:* 12V 100Ah (1200 Wh LiFePO4 or Lead-Acid Bank, ~140x capacity)\n"
             f"• 💡 *Load Capacity:* Can power a 50W BLDC ceiling fan for ~19 hours or 3x 10W LED bulbs for 32 hours continuously!\n"
-            f"• 💰 *TNEB Financial Savings:* ~14.4 kWh units/month = approx `₹115 - ₹130 / month` grid displacement!\n"
+            f"• ⚡ *Clean Solar Energy Output:* ~14.4 kWh clean solar energy generated monthly!\n"
             f"• 🔄 *Algorithms Maintained:* Same Coulomb Counting + Random Forest ML health architecture scales seamlessly to multi-cell BMS packages."
         )
 
@@ -543,8 +542,7 @@ You are "SolarBot", the friendly and intelligent 2-way conversational AI Copilot
 LIVE TELEMETRY:
 • Battery: {v_bat:.2f}V | Health/SoC: {soh:.0f}% (Hybrid Coulomb/ML SoC) | Cell Temp: {temp_c:.1f}°C ({thermal_status})
 • State: {mode} | Real Load: {cur_ma:.0f} mA ({p_w:.2f} W) | Usable Backup: {hrs}h {mins}m tonight
-• Solar Generation Today: {wh_tot:.1f} Wh | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']})
-• Electricity Savings: {tneb_u:.3f} Units saved today (₹{tneb_rs:.2f} today, ₹{monthly:.2f}/mo)
+• Solar Generation: {sol_w:.1f} W (1W to 5W Solar Panel) | Cleanliness: {panel_dust['cleanliness_pct']}% ({panel_dust['status']})
 • Weather in Salem: Today {weather['today_desc']} ({weather['today_temp']}°C), Tomorrow {weather['tmrw_desc']} ({weather['tmrw_rain_prob']}% rain probability, {weather.get('tmrw_rain_mm', 18.5)} mm expected rain)
 
 USER MESSAGE:
@@ -641,7 +639,7 @@ INSTRUCTIONS:
             f"☀️ *Solar Generation Report (Salem Station):*\n"
             f"• ⚡ *Energy Harvested Today:* `{wh_tot:.1f} Wh` (~`{tneb_u:.3f} kWh units`)\n"
             f"• 🔌 *Panel Output:* `{v_sol:.2f}V` (Cleanliness: `{panel_dust['cleanliness_pct']}%`)\n"
-            f"• 💰 *Replaced Grid Power:* Saved approx `₹{tneb_rs:.2f}` on your TNEB bill today!\n"
+            f"• ⚡ *Real-Time Solar Power:* `{sol_w:.1f} W` (Operating in 1W to 5W solar PV rating)\n"
             f"💡 *Status:* " + ("Panel glass has dust accumulation. Clean to harvest +58% more power!" if panel_dust.get('is_dusty') else "Panel glass is clean and harvesting peak sunlight.")
         )
 
@@ -680,7 +678,7 @@ INSTRUCTIONS:
             f"🔋 *வணக்கம்! தற்போதைய சோலார் & பேட்டரி நிலை:*\n"
             f"• 🔋 *பேட்டரி:* `{v_bat:.2f}V` (ஆரோக்கியம்: `{soh:.0f}%`, வெப்பம்: `{temp_c:.1f}°C`)\n"
             f"• ⏳ *பேக்கப்:* இன்றிரவு சுமார் `{hrs} மணி {mins} நிமிடம்` நீடிக்கும்.\n"
-            f"• ☀️ *சோலார்:* இன்று `{wh_tot:.1f} Wh` மின்சாரம் உற்பத்தி செய்யப்பட்டு ₹{tneb_rs:.2f} மிச்சப்படுத்தப்பட்டுள்ளது!\n"
+            f"• ☀️ *சோலார்:* இன்று `{wh_tot:.1f} Wh` ({sol_w:.1f} W திறன்) மின்சாரம் உற்பத்தி செய்யப்பட்டுள்ளது!\n"
             f"• 🌧️ *வானிலை:* நாளை சேலத்தில் `{weather['tmrw_desc']}` ({weather['tmrw_rain_prob']}% மழை வாய்ப்பு).\n"
             f"💡 ஏதேனும் சாதனம் (Fan, Light) இயக்கலாமா என்று சந்தேகமிருந்தால் தாராளமாக கேளுங்கள்!"
         )
@@ -728,8 +726,7 @@ INSTRUCTIONS:
             f"🤖 *Solar Battery AI Doctor — Live Status:*\n"
             f"• 🔋 *Battery:* `{v_bat:.2f}V` | Health: `{soh:.0f}%` | Backup: `{hrs}h {mins}m`\n"
             f"• ⚡ *Real State:* `{mode}` ({cur_ma:.0f} mA, {p_w:.2f} W)\n"
-            f"• ☀️ *Solar Panel:* `{wh_tot:.1f} Wh` | Cleanliness: `{panel_dust['cleanliness_pct']}%`\n"
-            f"• 💰 *TNEB Saved:* `₹{tneb_rs:.2f}` today\n"
+            f"• ☀️ *Solar Generation:* `{sol_w:.1f} W` (1W – 5W Panel) | Cleanliness: `{panel_dust['cleanliness_pct']}%`\n"
             f"• 🔮 *Tomorrow:* `{weather['tmrw_desc']}` (Rain: `{weather['tmrw_rain_prob']}%`)\n\n"
             f"💬 *Ask me any question! Examples:*\n"
             f"- _\"How much today generated?\"_\n"
@@ -794,7 +791,9 @@ def telegram_chatbot_worker():
                             f"📍 *Station:* {LOCATION_NAME}, TN • `{timestamp_str}`\n"
                             f"────────────────────────────────"
                         )
+                        sol_w = latest_telemetry.get('solar_w', round(min(5.0, max(0.5, (latest_telemetry['v_solar'] / 6.0) * 3.8)), 1))
                         body = generate_layman_report(
+                            solar_w=sol_w,
                             v_bat=latest_telemetry['v_battery'],
                             soh=latest_telemetry['pred_soh'],
                             hours=latest_telemetry['backup_hours'],
@@ -1063,6 +1062,7 @@ def run_monitor():
 
             # 4. Solar & TNEB Savings (only when solar panel is connected and generating)
             solar_connected = v_solar >= 0.5
+            solar_watts = round(min(5.0, max(0.5, (v_solar / 6.0) * 3.8)), 1) if solar_connected else 0.0
             wh_generated = round(v_solar * 0.48 * 5.0, 1) if solar_connected else 0.0
             tneb_units   = round(wh_generated / 1000.0, 3)
             tneb_saved   = round(tneb_units * 8.0, 2)
@@ -1096,6 +1096,7 @@ def run_monitor():
                 'backup_hours': backup_hours,
                 'backup_mins': backup_mins,
                 'wh_today': wh_generated,
+                'solar_w': solar_watts,
                 'tneb_units': tneb_units,
                 'tneb_saved': tneb_saved,
                 'monthly_saved': monthly_save,
@@ -1120,7 +1121,7 @@ def run_monitor():
                 pass
 
             # Stream to local terminal
-            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V ({panel_dust['status']}) | {current_mode} ({abs_current_ma:.0f}mA, {real_power_w:.2f}W) | SoH: {hybrid_soh:.0f}% (Hybrid) | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
+            print(f"[STREAM] Bat: {v_battery:.2f}V | Sol: {v_solar:.2f}V ({solar_watts:.1f}W, {panel_dust['status']}) | {current_mode} ({abs_current_ma:.0f}mA, {real_power_w:.2f}W) | SoH: {hybrid_soh:.0f}% (Hybrid) | Temp: {temp_bat:.1f}°C | Backup: {backup_hours}h {backup_mins}m | Tmrw: {weather_info['tmrw_desc']}")
 
             # 7. Generate & Send Predictive Report
             current_time = time.time()
@@ -1128,6 +1129,7 @@ def run_monitor():
                 last_report_timestamp = current_time
 
                 report_body = generate_layman_report(
+                    solar_w=solar_watts,
                     v_bat=v_battery,
                     soh=hybrid_soh,
                     hours=backup_hours,

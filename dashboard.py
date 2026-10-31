@@ -149,6 +149,7 @@ def render_dashboard():
     v_bat = float(latest.get('v_battery', 3.82))
     i_load = float(latest.get('i_load_ma', 410.0))
     v_sol = float(latest.get('v_solar', 5.85))
+    sol_w = round(min(5.0, max(0.5, (v_sol / 6.0) * 3.8)), 1) if v_sol > 0.5 else 0.0
     soh = float(latest.get('soh_percent', 94.0))
     temp_c = float(latest.get('temp_c', 29.8))
 
@@ -204,9 +205,9 @@ def render_dashboard():
     with c3:
         st.markdown(f"""
         <div class="card-container">
-            <div class="card-title">SOLAR PANEL INPUT</div>
-            <div class="card-value">{v_sol:.2f} V</div>
-            <div class="card-delta-green">3W Peak (Rock Light)</div>
+            <div class="card-title">SOLAR GENERATION (1W - 5W)</div>
+            <div class="card-value">{sol_w:.1f} W</div>
+            <div class="card-delta-green">{v_sol:.2f} V • Rated 1W to 5W</div>
         </div>
         """, unsafe_allow_html=True)
 
